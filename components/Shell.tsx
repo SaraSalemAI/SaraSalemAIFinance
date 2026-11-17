@@ -15,7 +15,7 @@ export function Shell({ children }: { children: ReactNode }) {
   const L = useL();
   const path = usePathname();
   const [open, setOpen] = useState(false);
-  if (path === "/board-pack" || path === "/design") return <>{children}</>;
+  if (path === "/board-pack" || path === "/design" || path === "/replica") return <>{children}</>;
   const groups = Object.keys(GROUPS) as (keyof typeof GROUPS)[];
   return (
     <div className={`shell ${open ? "nav-open" : ""}`}>
