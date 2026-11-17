@@ -1,0 +1,31 @@
+/* Tailwind v4 mapping. Prepared by Sara Salem. Copyright Sara Salem 2026.
+   Usage: @import "tailwindcss"; @import "./tokens.css"; @import "./tailwind.theme.css";
+   Then write bg-surface text-muted border-input rounded-lg shadow-lg, never raw hex. */
+@theme inline {
+  --color-bg: var(--rp-bg);
+  --color-surface: var(--rp-surface);
+  --color-surface-raised: var(--rp-surface-raised);
+  --color-border: var(--rp-border);
+  --color-border-input: var(--rp-border-input);
+  --color-text: var(--rp-text);
+  --color-muted: var(--rp-text-muted);
+  --color-accent: var(--rp-accent);
+  --color-accent-hover: var(--rp-accent-hover);
+  --color-on-accent: var(--rp-on-accent);
+  --color-ring: var(--rp-ring);
+  --color-danger: var(--rp-danger);
+  --color-on-danger: var(--rp-on-danger);
+  --color-success: var(--rp-success);
+  --color-warning: var(--rp-warning);
+  --font-sans: var(--rp-font);
+  --font-mono: var(--rp-mono);
+  --radius-sm: var(--rp-radius-sm);
+  --radius-md: var(--rp-radius-md);
+  --radius-lg: var(--rp-radius-lg);
+  --radius-xl: var(--rp-radius-xl);
+  --shadow-sm: var(--rp-shadow-sm);
+  --shadow-md: var(--rp-shadow-md);
+  --shadow-lg: var(--rp-shadow-lg);
+  --container-page: var(--rp-max);
+}
+@custom-variant dark (&:is(.dark *));
