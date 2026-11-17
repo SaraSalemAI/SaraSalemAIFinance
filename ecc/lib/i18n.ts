@@ -1,0 +1,76 @@
+// Arabic / English dictionary. Prepared by Sara Salem. Copyright Sara Salem 2026.
+export type Locale = "en" | "ar";
+export const LOCALES: Locale[] = ["en", "ar"];
+export const dir = (l: Locale) => (l === "ar" ? "rtl" : "ltr");
+export type L = { en: string; ar: string };
+
+export const dict = {
+  appName: { en: "Enterprise Control Console", ar: "وحدة التحكم المؤسسية" },
+  dashboard: { en: "Executive dashboard", ar: "لوحة القيادة التنفيذية" },
+  finance: { en: "Finance", ar: "المالية" },
+  hr: { en: "Human resources", ar: "الموارد البشرية" },
+  operations: { en: "Operations", ar: "العمليات" },
+  workflows: { en: "Workflows", ar: "سير العمل" },
+  agents: { en: "AI agent console", ar: "وحدة وكلاء الذكاء الاصطناعي" },
+  integrations: { en: "Integration hub", ar: "مركز التكامل" },
+  governance: { en: "Data governance", ar: "حوكمة البيانات" },
+  risk: { en: "Risk & compliance", ar: "المخاطر والامتثال" },
+  reports: { en: "Reports", ar: "التقارير" },
+  documents: { en: "Documents", ar: "المستندات" },
+  users: { en: "Users & roles", ar: "المستخدمون والأدوار" },
+  admin: { en: "Administration", ar: "الإدارة" },
+  audit: { en: "Audit log", ar: "سجل التدقيق" },
+  notifications: { en: "Notifications", ar: "الإشعارات" },
+  signIn: { en: "Sign in", ar: "تسجيل الدخول" },
+  signUp: { en: "Create account", ar: "إنشاء حساب" },
+  signOut: { en: "Sign out", ar: "تسجيل الخروج" },
+  email: { en: "E-mail", ar: "البريد الإلكتروني" },
+  password: { en: "Password", ar: "كلمة المرور" },
+  fullName: { en: "Full name", ar: "الاسم الكامل" },
+  save: { en: "Save", ar: "حفظ" },
+  create: { en: "Create", ar: "إنشاء" },
+  edit: { en: "Edit", ar: "تعديل" },
+  delete: { en: "Delete", ar: "حذف" },
+  cancel: { en: "Cancel", ar: "إلغاء" },
+  actions: { en: "Actions", ar: "إجراءات" },
+  none: { en: "No records yet.", ar: "لا توجد سجلات بعد." },
+  noAccess: { en: "Your role does not include access to this area.", ar: "دورك لا يتيح الوصول إلى هذا القسم." },
+  newOrg: { en: "Create an organization", ar: "إنشاء مؤسسة" },
+  orgName: { en: "Organization name", ar: "اسم المؤسسة" },
+  orgSlug: { en: "Short address (a-z, 0-9, -)", ar: "العنوان المختصر (a-z, 0-9, -)" },
+  demoOrg: { en: "Create demo organization (synthetic data)", ar: "إنشاء مؤسسة تجريبية (بيانات وهمية)" },
+  demoBadge: { en: "Demo data", ar: "بيانات تجريبية" },
+  yourOrgs: { en: "Your organizations", ar: "مؤسساتك" },
+  role: { en: "Role", ar: "الدور" },
+  status: { en: "Status", ar: "الحالة" },
+  addMember: { en: "Add member by e-mail", ar: "إضافة عضو بالبريد الإلكتروني" },
+  verifyChain: { en: "Verify hash chain", ar: "التحقق من سلسلة التجزئة" },
+  chainOk: { en: "Chain intact", ar: "السلسلة سليمة" },
+  chainBroken: { en: "Chain broken at entry", ar: "السلسلة مكسورة عند السجل" },
+  start: { en: "Start", ar: "بدء" },
+  moveTo: { en: "Move to", ar: "نقل إلى" },
+  history: { en: "History", ar: "السجل" },
+  comment: { en: "Comment", ar: "تعليق" },
+  run: { en: "Run", ar: "تشغيل" },
+  approve: { en: "Approve", ar: "اعتماد" },
+  reject: { en: "Reject", ar: "رفض" },
+  execute: { en: "Execute", ar: "تنفيذ" },
+  upload: { en: "Upload", ar: "رفع" },
+  markRead: { en: "Mark read", ar: "تعليم كمقروء" },
+  language: { en: "العربية", ar: "English" },
+  unavailable: { en: "Unavailable", ar: "غير متاح" },
+  notConfigured: { en: "Not configured", ar: "غير مهيأ" },
+  agentNote: {
+    en: "Agents produce text for human review only. They cannot change records. Each run needs approval by a second person, and executes only when a model provider key is configured on the server.",
+    ar: "ينتج الوكلاء نصاً للمراجعة البشرية فقط ولا يمكنهم تعديل السجلات. يتطلب كل تشغيل موافقة شخص آخر، ولا يُنفَّذ إلا عند تهيئة مفتاح مزوّد النموذج على الخادم.",
+  },
+  integrationNote: {
+    en: "Connectors are listed for planning. None exchanges data until it is implemented and configured; status shows exactly which.",
+    ar: "الموصلات مدرجة للتخطيط. لا يتبادل أي منها البيانات قبل تنفيذه وتهيئته، وتوضح الحالة ذلك بدقة.",
+  },
+  footer: { en: "Prepared by Sara Salem · © Sara Salem 2026", ar: "إعداد سارة سالم · © سارة سالم 2026" },
+} satisfies Record<string, L>;
+
+export type Key = keyof typeof dict;
+export const tr = (l: Locale, k: Key) => dict[k][l];
+export const pick = (l: Locale, v: L) => v[l];

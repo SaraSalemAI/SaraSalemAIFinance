@@ -1,0 +1,28 @@
+# ECC CI — typecheck, unit tests, build, and database RLS tests on PostgreSQL 16.
+# Prepared by Sara Salem. Copyright Sara Salem 2026.
+name: ecc
+on:
+  push: { paths: ["ecc/**", ".github/workflows/ecc.yml"] }
+  pull_request: { paths: ["ecc/**", ".github/workflows/ecc.yml"] }
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: ecc } }
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_PASSWORD: postgres }
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: ecc/package-lock.json }
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+        env: { NEXT_PUBLIC_SUPABASE_URL: "https://example.supabase.co", NEXT_PUBLIC_SUPABASE_ANON_KEY: "ci-placeholder" }
+      - run: sudo apt-get install -y postgresql-client
+      - run: scripts/test-db.sh
+        env: { PGHOST: localhost, PGPORT: 5432, PGUSER: postgres, PGPASSWORD: postgres }

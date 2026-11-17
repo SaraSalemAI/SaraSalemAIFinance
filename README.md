@@ -1,6 +1,10 @@
 # Sara Salem
 AI creator
 
+## Enterprise Control Console
+
+The multi-tenant Enterprise Control Console (Next.js + Supabase) lives in [`ecc/`](ecc/README.md).
+
 ## AI CFO — Financial Intelligence Platform
 
 A bilingual (English / Arabic, RTL) Next.js app for Egyptian finance teams, built from the *AI CFO Financial Intelligence Master Prompt* (v3/v4). It covers all 17 modules of the specification. Every number is produced by deterministic, tested TypeScript; AI (through **Vercel AI Gateway**) only explains figures the server has recomputed, and suggests account mappings for the analyst to confirm.
