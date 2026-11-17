@@ -8,9 +8,11 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pptxgenjs/3.12.0/pptxgen.bundle.js"></script>
 <style>
 /* Prepared by Sara Salem. Copyright Sara Salem 2026.
-   Layout: sticky header with tabs; Convert = upload → files with progress → output → results; Saved sheets = list + editable preview. */
+   Layout: sticky header with tabs; Convert = upload → files with progress → output picker → results; Saved sheets = list + editable grid. */
 :root{
   --bg:#ffffff;--surface:#f1f5f9;--raised:#ffffff;--border:#e2e8f0;--border-input:#62748e;
   --text:#020618;--muted:#45556c;--accent:#0f172b;--accent-hover:#1d293d;--on-accent:#f8fafc;--ring:#62748e;
@@ -51,10 +53,11 @@ header{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:va
 main{display:flex;flex-direction:column;gap:28px;padding-block:28px 48px}
 section>h2{font-size:20px;font-weight:600;letter-spacing:-.02em;margin-bottom:4px;text-wrap:balance}
 .step{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--accent);color:var(--on-accent);font-size:12px;font-weight:600;margin-right:8px;vertical-align:2px}
-.drop{margin-top:14px;border:1.5px dashed var(--border-input);border-radius:var(--r-xl);padding:36px 16px;display:grid;justify-items:center;gap:12px;text-align:center;background:var(--raised);transition:background .15s}
+.drop{margin-top:14px;border:1.5px dashed var(--border-input);border-radius:var(--r-xl);padding:32px 16px;display:grid;justify-items:center;gap:12px;text-align:center;background:var(--raised);transition:background .15s}
 .drop.over{background:var(--surface)}
 .drop svg.big{width:36px;height:36px}
-.fmts{font-size:12px;color:var(--muted);max-width:60ch}
+.groups{display:grid;gap:4px;font-size:12px;color:var(--muted);max-width:72ch;text-align:center}
+.groups b{color:var(--text);font-weight:600}
 .list{display:flex;flex-direction:column;gap:10px;margin-top:14px}
 .file{border:1px solid var(--border);border-radius:var(--r-lg);background:var(--raised);padding:12px 14px;display:grid;gap:8px;min-width:0}
 .frow{display:flex;align-items:center;gap:12px;min-width:0}
@@ -69,12 +72,22 @@ section>h2{font-size:20px;font-weight:600;letter-spacing:-.02em;margin-bottom:4p
 .spin{width:12px;height:12px;border:2px solid var(--border);border-top-color:var(--bar);border-radius:50%;animation:sp .8s linear infinite}
 @keyframes sp{to{transform:rotate(360deg)}}
 .sheets-pick{display:flex;flex-wrap:wrap;gap:6px}
-.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:99px;padding:4px 10px;font-size:12px;cursor:pointer;background:transparent;color:var(--text)}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:99px;padding:4px 10px;font-size:12px;cursor:pointer;background:transparent;color:var(--text);font-family:var(--font)}
 .chip input{margin:0}
-.opts{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;margin-top:14px}
-.fld{display:grid;gap:6px;font-size:13px;font-weight:500}
-select{height:38px;border:1px solid var(--border-input);border-radius:var(--r-md);background:var(--bg);color:var(--text);font:inherit;font-size:14px;padding:0 10px;min-width:220px}
-.check{display:flex;align-items:center;gap:8px;font-size:14px;height:38px}
+.fmtgrid{display:grid;gap:14px;margin-top:14px}
+.fgroup{display:grid;gap:8px}
+.fgroup>span{font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
+.fopts{display:flex;flex-wrap:wrap;gap:8px}
+.fopt{position:relative}
+.fopt input{position:absolute;opacity:0;inset:0;cursor:pointer}
+.fopt label{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:var(--r-md);padding:7px 12px;font:500 13px var(--font);cursor:pointer;background:var(--raised)}
+.fopt label small{font:500 10px var(--mono);color:var(--muted)}
+.fopt input:checked+label{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent);background:var(--surface)}
+.fopt input:focus-visible+label{outline:2px solid var(--ring);outline-offset:2px}
+.fopt input:disabled+label{opacity:.4;cursor:not-allowed}
+.go-row{display:flex;flex-wrap:wrap;gap:16px;align-items:center;margin-top:16px}
+.check{display:flex;align-items:center;gap:8px;font-size:14px}
+.note{font-size:12px;color:var(--muted);margin-top:8px}
 .overall{display:flex;align-items:center;gap:12px;font-size:13px;color:var(--muted);margin-top:12px}
 .overall .prog{flex:1;max-width:320px}
 .res{display:flex;flex-direction:column;gap:10px;margin-top:14px}
@@ -84,22 +97,21 @@ select{height:38px;border:1px solid var(--border-input);border-radius:var(--r-md
 table{border-collapse:collapse;font:12px/1.35 var(--mono);min-width:100%}
 th,td{border-right:1px solid var(--border);border-bottom:1px solid var(--border);padding:6px 10px;text-align:start;white-space:nowrap;max-width:280px;overflow:hidden;text-overflow:ellipsis}
 thead th{background:var(--surface);font-weight:600;position:sticky;top:0}
-td[contenteditable="true"]:focus{outline:2px solid var(--accent);outline-offset:-2px}
-pre.txt{margin:0;padding:12px;font:12px/1.5 var(--mono);white-space:pre-wrap;word-break:break-word}
+td[contenteditable="true"]:focus,th[contenteditable="true"]:focus{outline:2px solid var(--accent);outline-offset:-2px}
 .saved{display:grid;grid-template-columns:minmax(0,1fr);gap:16px}
 @media(min-width:900px){.saved{grid-template-columns:280px minmax(0,1fr)}}
 .slist{display:flex;flex-direction:column;gap:6px}
 .sitem{border:1px solid var(--border);border-radius:var(--r-lg);background:var(--raised);padding:10px 12px;text-align:start;cursor:pointer;color:var(--text);font:inherit}
 .sitem[aria-current="true"]{border-color:var(--accent)}
 .empty{border:1px dashed var(--border-input);border-radius:var(--r-lg);padding:32px 16px;text-align:center;color:var(--muted)}
-.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--accent);color:var(--on-accent);padding:10px 14px;border-radius:var(--r-md);font-size:13px;box-shadow:var(--sh-lg);z-index:50;display:flex;gap:10px;align-items:center}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--accent);color:var(--on-accent);padding:10px 14px;border-radius:var(--r-md);font-size:13px;box-shadow:var(--sh-lg);z-index:50;display:flex;gap:10px;align-items:center;max-width:calc(100vw - 32px)}
 .toast button{background:transparent;border:1px solid var(--on-accent);color:var(--on-accent);border-radius:6px;padding:3px 8px;font:500 12px var(--font);cursor:pointer}
 footer{border-top:1px solid var(--border);padding-block:16px;font-size:12px;color:var(--muted)}
 @media (prefers-reduced-motion:reduce){.spin{animation:none}.prog>i{transition:none}}
 </style>
 
 <header><div class="wrap hd">
-  <div class="brand"><svg class="i" style="width:20px;height:20px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M8 13h8M8 17h8"/></svg>SyncSheets</div>
+  <div class="brand"><svg class="i" style="width:20px;height:20px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M8 13h8M8 17h8"/></svg>SyncSheets</div>
   <nav class="tabs" role="tablist" aria-label="Sections">
     <button class="tab" role="tab" id="t-convert" aria-selected="true" aria-controls="p-convert">Convert</button>
     <button class="tab" role="tab" id="t-saved" aria-selected="false" aria-controls="p-saved">Saved sheets <span id="scount" class="muted"></span></button>
@@ -114,22 +126,18 @@ footer{border-top:1px solid var(--border);padding-block:16px;font-size:12px;colo
     <div class="drop" id="drop">
       <svg class="big" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></svg>
       <label class="btn primary" for="fin" style="cursor:pointer">Upload files</label>
-      <input id="fin" type="file" multiple class="sr" accept=".xlsx,.xls,.xlsm,.csv,.tsv,.ods,.json,.md,.markdown,.txt,.html,.htm,.xml,.docx,.pdf,.png,.jpg,.jpeg,.webp">
-      <p class="fmts">or drop them here · Excel · CSV · TSV · ODS · JSON · Markdown · TXT · HTML · XML · DOCX · PDF · PNG/JPG/WebP · up to 10 MB each</p>
+      <input id="fin" type="file" multiple class="sr">
+      <div class="groups" id="ingroups"></div>
+      <p class="muted" style="font-size:12px">or drop them here · up to 25 MB each</p>
     </div>
     <div class="list" id="files"></div>
   </section>
 
   <section>
     <h2><span class="step">2</span>Convert to</h2>
-    <div class="opts">
-      <label class="fld">Output format
-        <select id="fmt">
-          <option value="xlsx">Excel (.xlsx)</option><option value="csv">CSV (.csv)</option>
-          <option value="md" selected>Markdown (.md)</option><option value="json">JSON (.json)</option>
-          <option value="txt">Text, tab-separated (.txt)</option><option value="html">HTML (.html)</option>
-          <option value="docx">Word (.docx)</option><option value="pdf">PDF (.pdf)</option>
-        </select></label>
+    <div class="fmtgrid" id="fmtgrid" role="radiogroup" aria-label="Output format"></div>
+    <p class="note" id="fmtnote"></p>
+    <div class="go-row">
       <label class="check"><input type="checkbox" id="savesheet" checked> Also save as a sheet</label>
       <button class="btn primary" id="go" disabled>Convert</button>
     </div>
@@ -138,7 +146,7 @@ footer{border-top:1px solid var(--border);padding-block:16px;font-size:12px;colo
 
   <section id="ressec" hidden>
     <h2><span class="step">3</span>Download</h2>
-    <div class="row" style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><button class="btn outline" id="dlall">Download all (.zip)</button></div>
+    <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><button class="btn outline" id="dlall">Download all (.zip)</button></div>
     <div class="res" id="results"></div>
     <div id="prevwrap"></div>
   </section>
@@ -161,23 +169,50 @@ footer{border-top:1px solid var(--border);padding-block:16px;font-size:12px;colo
 (()=>{
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const MAX=10*1024*1024, STORE="syncsheets-converter-sheets-v1";
+const MAX=25*1024*1024, STORE="syncsheets-converter-sheets-v1";
 const kb=n=>n<1024?n+" B":n<1048576?(n/1024).toFixed(1)+" KB":(n/1048576).toFixed(1)+" MB";
 const base=n=>n.replace(/\.[^.]+$/,"");
 const ext=n=>(n.match(/\.([^.]+)$/)||[,""])[1].toLowerCase();
 const tick=()=>new Promise(r=>setTimeout(r,30));
 let downloads=null;window.claude?.use?.("downloads").then(d=>downloads=d).catch(()=>{});
+/* extensions the viewer can save directly; anything else is delivered inside a .zip */
+const ALLOW=new Set("gif png jpg jpeg webp mp4 webm mov txt json md docx pptx epub csv ttf html svg pdf xlsx zip fig".split(" "));
+
+/* ---------- input types ---------- */
+const IN={
+  "Spreadsheets":{xlsx:"Excel",xlsm:"Excel",xlsb:"Excel binary",xls:"Excel 97",ods:"OpenDocument",fods:"Flat ODS",numbers:"Numbers",csv:"CSV",tsv:"TSV",tab:"TSV",dif:"DIF",slk:"SYLK",dbf:"dBASE",prn:"PRN"},
+  "Documents":{docx:"Word",odt:"OpenDocument text",rtf:"Rich text",pdf:"PDF",pptx:"PowerPoint",epub:"eBook",html:"HTML",htm:"HTML",xhtml:"XHTML",md:"Markdown",markdown:"Markdown",txt:"Text",tex:"LaTeX",log:"Log"},
+  "Data":{json:"JSON",jsonl:"JSON Lines",ndjson:"JSON Lines",geojson:"GeoJSON",xml:"XML",yaml:"YAML",yml:"YAML",toml:"TOML",ini:"INI",sql:"SQL",env:"ENV"},
+  "Images":{png:"PNG",jpg:"JPEG",jpeg:"JPEG",webp:"WebP",gif:"GIF",bmp:"BMP",avif:"AVIF",ico:"Icon",svg:"SVG"}
+};
+const KNOWN=Object.assign({},...Object.values(IN));
+const IMG_IN=new Set(Object.keys(IN.Images));
+$("#ingroups").innerHTML=Object.entries(IN).map(([g,m])=>`<span><b>${g}:</b> ${[...new Set(Object.keys(m))].map(e=>e.toUpperCase()).join(" · ")}</span>`).join("");
+$("#fin").setAttribute("accept",Object.keys(KNOWN).map(e=>"."+e).join(","));
+
+/* ---------- output types ---------- */
+const OUT={
+  "Spreadsheets":[["xlsx","Excel"],["xls","Excel 97"],["ods","OpenDocument"],["csv","CSV"],["tsv","TSV"]],
+  "Documents":[["docx","Word"],["pdf","PDF"],["pptx","PowerPoint"],["html","HTML"],["md","Markdown"],["txt","Text"],["rtf","Rich text"],["epub","eBook"],["tex","LaTeX"]],
+  "Data":[["json","JSON"],["xml","XML"],["yaml","YAML"],["sql","SQL"]],
+  "Images":[["png","PNG"],["jpg","JPEG"],["webp","WebP"],["svg","SVG"]]
+};
+const IMAGE_OK=new Set(["png","jpg","webp","svg","pdf","html","docx","pptx"]);
+$("#fmtgrid").innerHTML=Object.entries(OUT).map(([g,list])=>`<div class="fgroup"><span>${g}</span><div class="fopts">${list.map(([v,l])=>`<div class="fopt"><input type="radio" name="fmt" id="f-${v}" value="${v}" ${v==="md"?"checked":""}><label for="f-${v}">${l} <small>.${v}</small></label></div>`).join("")}</div></div>`).join("");
+const fmtVal=()=>(document.querySelector('input[name="fmt"]:checked')||{}).value||"md";
+function updNote(){const f=fmtVal();const imgs=S.files.some(x=>x.doc&&x.doc.image);
+  $("#fmtnote").textContent=(ALLOW.has(f)?"":`.${f} files are delivered inside a .zip so your browser can save them. `)+(imgs&&!IMAGE_OK.has(f)?"Images can only become PNG, JPEG, WebP, SVG, PDF, HTML, Word or PowerPoint; they'll be skipped for this format.":"")}
+$("#fmtgrid").addEventListener("change",updNote);
 
 /* ---------- state ---------- */
 const S={files:[],results:[],saved:[]};
 try{S.saved=JSON.parse(localStorage.getItem(STORE)||"[]")}catch(e){}
 const persist=()=>{try{localStorage.setItem(STORE,JSON.stringify(S.saved))}catch(e){toast("Couldn't save in this browser (storage full or blocked).")}};
+let busy=false;
 
-/* ---------- tabs ---------- */
+/* ---------- tabs + toast ---------- */
 function showTab(id){["convert","saved"].forEach(t=>{$("#t-"+t).setAttribute("aria-selected",t===id);$("#p-"+t).hidden=t!==id});if(id==="saved")renderSaved()}
 $("#t-convert").onclick=()=>showTab("convert");$("#t-saved").onclick=()=>showTab("saved");
-
-/* ---------- toast ---------- */
 function toast(msg,action){document.querySelectorAll(".toast").forEach(x=>x.remove());const t=document.createElement("div");t.className="toast";t.setAttribute("role","status");t.innerHTML=`<span>${esc(msg)}</span>`;
   if(action){const b=document.createElement("button");b.textContent=action.label;b.onclick=()=>{action.fn();t.remove()};t.appendChild(b)}
   document.body.appendChild(t);setTimeout(()=>t.remove(),action?6000:2600)}
@@ -188,17 +223,16 @@ const drop=$("#drop");
 ["dragleave","drop"].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.remove("over")}));
 drop.addEventListener("drop",e=>addFiles(e.dataTransfer.files));
 $("#fin").onchange=e=>{addFiles(e.target.files);e.target.value=""};
-const KNOWN={xlsx:"Excel",xls:"Excel",xlsm:"Excel",csv:"CSV",tsv:"TSV",ods:"ODS",json:"JSON",md:"Markdown",markdown:"Markdown",txt:"Text",html:"HTML",htm:"HTML",xml:"XML",docx:"Word",pdf:"PDF",png:"Image",jpg:"Image",jpeg:"Image",webp:"Image"};
 async function addFiles(list){list=Array.from(list||[]);
   for(const f of list){
     const it={id:Math.random().toString(36).slice(2),file:f,name:f.name,type:ext(f.name),size:f.size,stage:"Ready",pct:0,state:"idle",doc:null,pick:null,err:""};
-    if(!KNOWN[it.type]){it.state="err";it.err="This file type isn't supported."}
-    else if(f.size>MAX){it.state="err";it.err="Over the 10 MB limit."}
+    if(!KNOWN[it.type]){it.state="err";it.err=`.${it.type||"?"} files aren't supported yet.`}
+    else if(f.size>MAX){it.state="err";it.err="Over the 25 MB limit."}
     S.files.push(it);renderFiles();
     if(it.state!=="err")await read(it);
   }
+  updNote();
 }
-/* read immediately so the user can pick worksheets and see the detected content */
 async function read(it){
   try{setStage(it,"Uploading",15,"run");await tick();
     const buf=await it.file.arrayBuffer();setStage(it,"Reading",40,"run");await tick();
@@ -207,75 +241,130 @@ async function read(it){
     setStage(it,`Ready · ${describe(it.doc)}`,100,"ready");
   }catch(e){it.state="err";it.err=e.message||"Couldn't read this file.";renderFiles()}
 }
-const describe=d=>d.image?"image":d.sheets.length+(d.sheets.length===1?" table":" tables")+" · "+d.sheets.reduce((a,s)=>a+Math.max(0,s.rows.length),0)+" rows";
+const describe=d=>d.image?`image · ${d.image.w}×${d.image.h}`:d.sheets.length+(d.sheets.length===1?" table":" tables")+" · "+d.sheets.reduce((a,s)=>a+Math.max(0,s.rows.length),0)+" rows";
 function setStage(it,stage,pct,state){it.stage=stage;it.pct=pct;if(state)it.state=state;renderFiles()}
 function renderFiles(){
-  const el=$("#files");
-  el.innerHTML=S.files.map(it=>{
+  $("#files").innerHTML=S.files.map(it=>{
     const cls=it.state==="err"?"err":it.state==="done"||it.state==="ready"?"ok":"";
     const pct=it.state==="err"?100:it.pct;
     const st=it.state==="err"?`✕ ${esc(it.err)}`:(it.state==="run"?'<span class="spin" aria-hidden="true"></span>':it.state==="done"||it.state==="ready"?"✓ ":"")+esc(it.stage)+(it.state==="run"?` · ${pct}%`:"");
-    const pick=it.doc&&it.doc.sheets.length>1?`<div class="sheets-pick" aria-label="Worksheets to convert">${it.doc.sheets.map((s,i)=>`<label class="chip"><input type="checkbox" data-f="${it.id}" data-s="${i}" ${it.pick[i]?"checked":""}>${esc(s.name)}</label>`).join("")}</div>`:"";
+    const pick=it.doc&&it.doc.sheets.length>1?`<div class="sheets-pick" aria-label="Tables to convert">${it.doc.sheets.map((s,i)=>`<label class="chip"><input type="checkbox" data-f="${it.id}" data-s="${i}" ${it.pick[i]?"checked":""}>${esc(s.name)}</label>`).join("")}</div>`:"";
     return`<div class="file"><div class="frow"><span class="ftype">${esc(it.type)}</span><span class="fname" title="${esc(it.name)}">${esc(it.name)}</span><span class="fsize">${kb(it.size)}</span>
       <button class="btn ghost small icon" data-rm="${it.id}" aria-label="Remove ${esc(it.name)}" ${busy?"disabled":""}>✕</button></div>
       <div class="prog ${cls}" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="${esc(it.name)} progress"><i style="width:${pct}%"></i></div>
       <div class="stage ${cls}" aria-live="polite">${st}</div>${pick}</div>`}).join("");
   $("#go").disabled=busy||!S.files.some(f=>f.doc);
 }
-$("#files").addEventListener("click",e=>{const b=e.target.closest("[data-rm]");if(b){S.files=S.files.filter(f=>f.id!==b.dataset.rm);renderFiles()}});
+$("#files").addEventListener("click",e=>{const b=e.target.closest("[data-rm]");if(b){S.files=S.files.filter(f=>f.id!==b.dataset.rm);renderFiles();updNote()}});
 $("#files").addEventListener("change",e=>{const c=e.target.closest("input[data-f]");if(!c)return;const it=S.files.find(f=>f.id===c.dataset.f);it.pick[+c.dataset.s]=c.checked});
 
 /* ---------- parsers: every input becomes {sheets:[{name,rows}], text?, image?} ---------- */
 const td=new TextDecoder();
+const need=(lib,what)=>{if(!lib)throw Error(`The ${what} reader didn't load. Check your connection and reload.`)};
 const clean=rows=>{rows=rows.map(r=>r.map(c=>c==null?"":String(c)));const w=Math.max(0,...rows.map(r=>r.length));return rows.filter(r=>r.some(c=>c.trim()!=="")).map(r=>{while(r.length<w)r.push("");return r})};
-const textSheets=t=>[{name:"Text",rows:t.split(/\r?\n/).filter(l=>l.trim()).map(l=>[l])}];
+const textSheets=t=>{const rows=String(t).split(/\r?\n/).filter(l=>l.trim()).map(l=>[l]);return rows.length?[{name:"Text",rows}]:[]};
+const nonEmpty=d=>{if(!d.image&&!d.sheets.length)throw Error("No text or tables found in this file.");return d};
+const parseXml=s=>{const d=new DOMParser().parseFromString(s,"application/xml");if(d.querySelector("parsererror"))throw Error("This file's XML isn't well-formed.");return d};
+const byTag=(el,t)=>[...el.getElementsByTagNameNS("*",t)];
+function fromData(j){
+  const fromArr=(a,name)=>{if(!Array.isArray(a)||!a.length)return null;if(a.every(Array.isArray))return{name,rows:clean(a)};
+    if(a.every(x=>x&&typeof x==="object")){const keys=[...new Set(a.flatMap(Object.keys))];return{name,rows:clean([keys,...a.map(o=>keys.map(k=>typeof o[k]==="object"&&o[k]!==null?JSON.stringify(o[k]):o[k]))])}}
+    return{name,rows:clean(a.map(x=>[x]))}};
+  if(j&&j.type==="FeatureCollection"&&Array.isArray(j.features))return[fromArr(j.features.map(f=>({...f.properties,geometry_type:f.geometry?.type,coordinates:JSON.stringify(f.geometry?.coordinates)})),"Features")];
+  if(Array.isArray(j))return[fromArr(j,"Data")].filter(Boolean);
+  if(j&&typeof j==="object"){const out=[];for(const[k,v]of Object.entries(j))if(Array.isArray(v)){const s=fromArr(v,k.slice(0,31));if(s)out.push(s)}
+    if(out.length)return out;return[{name:"Data",rows:[["Key","Value"],...flat(j).map(([k,v])=>[k,v])]}]}
+  return textSheets(String(j));
+}
+const flat=(o,p="")=>Object.entries(o).flatMap(([k,v])=>v&&typeof v==="object"&&!Array.isArray(v)?flat(v,p+k+"."):[[p+k,Array.isArray(v)?JSON.stringify(v):v]]);
 async function parse(it,buf,prog){
   const t=it.type;
-  if(["xlsx","xls","xlsm","ods","csv","tsv"].includes(t)){
-    if(!window.XLSX)throw Error("The spreadsheet reader didn't load. Check your connection and reload.");
-    const opts={type:"array",raw:false};if(t==="tsv"){opts.type="string";opts.FS="\t"}
-    const wb=XLSX.read(t==="tsv"?td.decode(buf):buf,opts);prog(1);
-    return{sheets:wb.SheetNames.map(n=>({name:n,rows:clean(XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:false,defval:""}))})).filter(s=>s.rows.length)};
-  }
-  if(t==="json"){const j=JSON.parse(td.decode(buf));prog(1);
-    const fromArr=(a,name)=>{if(!Array.isArray(a)||!a.length)return null;if(a.every(Array.isArray))return{name,rows:clean(a)};
-      if(a.every(x=>x&&typeof x==="object")){const keys=[...new Set(a.flatMap(Object.keys))];return{name,rows:clean([keys,...a.map(o=>keys.map(k=>typeof o[k]==="object"&&o[k]!==null?JSON.stringify(o[k]):o[k]))])}}
-      return{name,rows:clean(a.map(x=>[x]))}};
-    let sheets=[];if(Array.isArray(j))sheets=[fromArr(j,"Data")];
-    else if(j&&typeof j==="object"){for(const[k,v]of Object.entries(j))if(Array.isArray(v))sheets.push(fromArr(v,k.slice(0,31)));
-      if(!sheets.filter(Boolean).length)sheets=[{name:"Data",rows:[["Key","Value"],...Object.entries(j).map(([k,v])=>[k,typeof v==="object"?JSON.stringify(v):v])]}]}
-    return{sheets:sheets.filter(Boolean)};
-  }
-  if(t==="md"||t==="markdown"){const s=td.decode(buf);prog(1);const tables=mdTables(s);return{sheets:tables.length?tables:textSheets(s),text:s}}
-  if(t==="txt"){const s=td.decode(buf);prog(1);
+  if(["xlsx","xlsm","xlsb","xls","ods","fods","numbers","csv","tsv","tab","dif","slk","dbf","prn"].includes(t)){need(window.XLSX,"spreadsheet");
+    const isTsv=t==="tsv"||t==="tab";const wb=XLSX.read(isTsv?td.decode(buf):buf,isTsv?{type:"string",FS:"\t",raw:false}:{type:"array",raw:false});prog(1);
+    return nonEmpty({sheets:wb.SheetNames.map(n=>({name:n,rows:clean(XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:false,defval:""}))})).filter(s=>s.rows.length)})}
+  if(t==="json"||t==="geojson"){const j=JSON.parse(td.decode(buf));prog(1);return nonEmpty({sheets:fromData(j)})}
+  if(t==="jsonl"||t==="ndjson"){const j=td.decode(buf).split(/\r?\n/).filter(l=>l.trim()).map(l=>JSON.parse(l));prog(1);return nonEmpty({sheets:fromData(j)})}
+  if(t==="yaml"||t==="yml"){need(window.jsyaml,"YAML");const docs=jsyaml.loadAll(td.decode(buf));prog(1);return nonEmpty({sheets:fromData(docs.length===1?docs[0]:docs)})}
+  if(t==="toml"||t==="ini"||t==="env"){const s=td.decode(buf);prog(1);const rows=[["Section","Key","Value"]];let sec="";
+    s.split(/\r?\n/).forEach(l=>{l=l.trim();if(!l||/^[#;]/.test(l))return;const m=l.match(/^\[+([^\]]+)\]+$/);if(m){sec=m[1];return}const kv=l.match(/^(?:export\s+)?([^=:]+?)\s*[=:]\s*(.*)$/);if(kv)rows.push([sec,kv[1].trim(),kv[2].trim().replace(/^["']|["']$/g,"")])});
+    return nonEmpty({sheets:rows.length>1?[{name:"Settings",rows}]:textSheets(s),text:s})}
+  if(t==="sql"){const s=td.decode(buf);prog(1);const sheets=sqlTables(s);return nonEmpty({sheets:sheets.length?sheets:textSheets(s),text:s})}
+  if(t==="md"||t==="markdown"){const s=td.decode(buf);prog(1);const tables=mdTables(s);return nonEmpty({sheets:tables.length?tables:textSheets(s),text:s})}
+  if(t==="txt"||t==="log"||t==="tex"){const s=td.decode(buf);prog(1);
     const lines=s.split(/\r?\n/).filter(l=>l.trim());const tabbed=lines.length>1&&lines.every(l=>l.includes("\t"));
-    return{sheets:tabbed?[{name:"Text",rows:clean(lines.map(l=>l.split("\t")))}]:textSheets(s),text:s}}
-  if(t==="html"||t==="htm"){const s=td.decode(buf);prog(1);const d=new DOMParser().parseFromString(s,"text/html");const tables=htmlTables(d);const text=d.body?.innerText||d.body?.textContent||"";return{sheets:tables.length?tables:textSheets(text),text}}
-  if(t==="xml"){const d=new DOMParser().parseFromString(td.decode(buf),"application/xml");if(d.querySelector("parsererror"))throw Error("This XML file isn't well-formed.");prog(1);return{sheets:[xmlTable(d)]}}
-  if(t==="docx"){if(!window.mammoth)throw Error("The Word reader didn't load. Check your connection and reload.");
+    return nonEmpty({sheets:tabbed?[{name:"Text",rows:clean(lines.map(l=>l.split("\t")))}]:textSheets(s),text:s})}
+  if(t==="html"||t==="htm"||t==="xhtml"){const s=td.decode(buf);prog(1);const d=new DOMParser().parseFromString(s,"text/html");return nonEmpty(fromHtmlDoc(d))}
+  if(t==="xml"){const d=parseXml(td.decode(buf));prog(1);return nonEmpty({sheets:[xmlTable(d)]})}
+  if(t==="docx"){need(window.mammoth,"Word");
     const h=await mammoth.convertToHtml({arrayBuffer:buf});prog(.6);const raw=await mammoth.extractRawText({arrayBuffer:buf});prog(1);
-    const d=new DOMParser().parseFromString(h.value,"text/html");const tables=htmlTables(d);return{sheets:tables.length?tables:textSheets(raw.value),text:raw.value}}
-  if(t==="pdf"){if(!window.pdfjsLib)throw Error("The PDF reader didn't load. Check your connection and reload.");
+    const d=new DOMParser().parseFromString(h.value,"text/html");const tables=htmlTables(d);return nonEmpty({sheets:tables.length?tables:textSheets(raw.value),text:raw.value})}
+  if(t==="odt"){need(window.JSZip,"OpenDocument");const z=await JSZip.loadAsync(buf);const x=parseXml(await z.file("content.xml").async("string"));prog(.7);
+    const tables=byTag(x,"table").map((tb,i)=>({name:tb.getAttribute("table:name")||"Table "+(i+1),rows:clean(byTag(tb,"table-row").map(r=>byTag(r,"table-cell").map(c=>c.textContent.trim())))})).filter(s=>s.rows.length);
+    const text=[...byTag(x,"h"),...byTag(x,"p")].sort((a,b)=>a.compareDocumentPosition(b)&2?1:-1).map(p=>p.textContent).join("\n");prog(1);
+    return nonEmpty({sheets:tables.length?tables:textSheets(text),text})}
+  if(t==="rtf"){const s=td.decode(buf);prog(.5);const txt=rtfText(s);prog(1);
+    const lines=txt.split("\n").filter(l=>l.trim());const tabbed=lines.filter(l=>l.includes("\t"));
+    return nonEmpty({sheets:tabbed.length>1?[{name:"Table",rows:clean(tabbed.map(l=>l.split("\t")))}]:textSheets(txt),text:txt})}
+  if(t==="pptx"){need(window.JSZip,"PowerPoint");const z=await JSZip.loadAsync(buf);
+    const slides=Object.keys(z.files).filter(n=>/^ppt\/slides\/slide\d+\.xml$/.test(n)).sort((a,b)=>+a.match(/\d+/)[0]-+b.match(/\d+/)[0]);
+    const sheets=[];let text="";
+    for(let i=0;i<slides.length;i++){const x=parseXml(await z.file(slides[i]).async("string"));
+      byTag(x,"tbl").forEach((tb,k)=>{const rows=clean(byTag(tb,"tr").map(r=>byTag(r,"tc").map(c=>c.textContent.trim())));if(rows.length)sheets.push({name:`Slide ${i+1} table ${k+1}`,rows})});
+      const paras=byTag(x,"p").filter(p=>!byTag(x,"tbl").some(tb=>tb.contains(p))).map(p=>byTag(p,"t").map(t=>t.textContent).join("")).filter(Boolean);
+      text+=`Slide ${i+1}\n${paras.join("\n")}\n\n`;prog((i+1)/slides.length);await tick()}
+    if(!sheets.length){const rows=[["Slide","Text"]];text.split("\n\n").filter(Boolean).forEach(b=>{const[h,...r]=b.split("\n");r.forEach(l=>rows.push([h,l]))});if(rows.length>1)sheets.push({name:"Slides",rows})}
+    return nonEmpty({sheets,text})}
+  if(t==="epub"){need(window.JSZip,"eBook");const z=await JSZip.loadAsync(buf);
+    let order=[];try{const c=parseXml(await z.file("META-INF/container.xml").async("string"));const opfPath=byTag(c,"rootfile")[0].getAttribute("full-path");const dir=opfPath.includes("/")?opfPath.replace(/[^/]+$/,""):"";
+      const opf=parseXml(await z.file(opfPath).async("string"));const man={};byTag(opf,"item").forEach(i=>man[i.getAttribute("id")]=dir+i.getAttribute("href"));order=byTag(opf,"itemref").map(r=>man[r.getAttribute("idref")]).filter(Boolean)}catch(e){}
+    if(!order.length)order=Object.keys(z.files).filter(n=>/\.x?html?$/i.test(n)).sort();
+    const sheets=[];let text="";
+    for(let i=0;i<order.length;i++){const f=z.file(decodeURIComponent(order[i]));if(!f)continue;const d=new DOMParser().parseFromString(await f.async("string"),"text/html");
+      htmlTables(d).forEach((s,k)=>sheets.push({name:`Chapter ${i+1} table ${k+1}`.slice(0,31),rows:s.rows}));text+=(d.body?.textContent||"").replace(/\n{3,}/g,"\n\n").trim()+"\n\n";prog((i+1)/order.length)}
+    return nonEmpty({sheets:sheets.length?sheets:textSheets(text),text})}
+  if(t==="pdf"){need(window.pdfjsLib,"PDF");
     const pdf=await pdfjsLib.getDocument({data:new Uint8Array(buf)}).promise;const sheets=[];let all="";
     for(let p=1;p<=pdf.numPages;p++){const page=await pdf.getPage(p);const tc=await page.getTextContent();const rows=pdfRows(tc.items);
       all+=rows.map(r=>r.join("  ")).join("\n")+"\n\n";if(rows.length)sheets.push({name:"Page "+p,rows:clean(rows)});prog(p/pdf.numPages);await tick()}
     if(!sheets.length)throw Error("No text found in this PDF. It may be a scanned image.");
     return{sheets,text:all}}
-  if(["png","jpg","jpeg","webp"].includes(t)){const url=await new Promise((r,j)=>{const fr=new FileReader();fr.onload=()=>r(fr.result);fr.onerror=j;fr.readAsDataURL(it.file)});
-    const dim=await new Promise(r=>{const im=new Image();im.onload=()=>r([im.naturalWidth,im.naturalHeight]);im.onerror=()=>r([800,600]);im.src=url});prog(1);
-    return{sheets:[],image:{url,w:dim[0],h:dim[1],fmt:t==="png"?"PNG":t==="webp"?"WEBP":"JPEG"}}}
+  if(IMG_IN.has(t)){const url=await new Promise((r,j)=>{const fr=new FileReader();fr.onload=()=>r(fr.result);fr.onerror=j;fr.readAsDataURL(it.file)});
+    const img=await new Promise((r,j)=>{const im=new Image();im.onload=()=>r(im);im.onerror=()=>j(Error("Your browser can't open this image."));im.src=url});
+    const w=img.naturalWidth||800,h=img.naturalHeight||600;
+    /* normalise to PNG so every writer can embed it */
+    const c=document.createElement("canvas");c.width=w;c.height=h;c.getContext("2d").drawImage(img,0,0,w,h);prog(1);
+    return{sheets:[],image:{url:c.toDataURL("image/png"),w,h,fmt:"PNG",canvas:c}}}
   throw Error("Unsupported file type.");
 }
-function mdTables(s){const out=[];const lines=s.split(/\r?\n/);let cur=null;
-  const cells=l=>l.trim().replace(/^\||\|$/g,"").split("|").map(c=>c.trim());
-  for(const l of lines){if(/^\s*\|.*\|\s*$/.test(l)){if(/^\s*\|?\s*:?-{2,}/.test(l.replace(/\|/g,"|"))&&/^[\s|:-]+$/.test(l))continue;(cur=cur||[]).push(cells(l))}else if(cur){out.push(cur);cur=null}}
+function fromHtmlDoc(d){const tables=htmlTables(d);const text=(d.body?.innerText||d.body?.textContent||"").trim();return{sheets:tables.length?tables:textSheets(text),text}}
+function mdTables(s){const out=[];let cur=null;const cells=l=>l.trim().replace(/^\||\|$/g,"").split("|").map(c=>c.trim());
+  for(const l of s.split(/\r?\n/)){if(/^\s*\|.*\|\s*$/.test(l)){if(/^[\s|:-]+$/.test(l))continue;(cur=cur||[]).push(cells(l))}else if(cur){out.push(cur);cur=null}}
   if(cur)out.push(cur);return out.map((r,i)=>({name:"Table "+(i+1),rows:clean(r)}))}
 function htmlTables(d){return[...d.querySelectorAll("table")].map((t,i)=>({name:"Table "+(i+1),rows:clean([...t.querySelectorAll("tr")].map(tr=>[...tr.children].map(c=>c.textContent.trim())))})).filter(s=>s.rows.length)}
 function xmlTable(d){const root=d.documentElement;let items=[...root.children];
   if(items.length===1&&items[0].children.length)items=[...items[0].children];
   const keys=[...new Set(items.flatMap(e=>[...[...e.attributes].map(a=>"@"+a.name),...[...e.children].map(c=>c.tagName)]))];
   if(!keys.length)return{name:root.tagName.slice(0,31),rows:clean([["Element","Text"],...items.map(e=>[e.tagName,e.textContent.trim()])])};
-  return{name:root.tagName.slice(0,31),rows:clean([keys,...items.map(e=>keys.map(k=>k[0]==="@"?e.getAttribute(k.slice(1)):(e.querySelector(":scope>"+CSS.escape(k))?.textContent.trim()??"")))])}}
+  return{name:root.tagName.slice(0,31),rows:clean([keys,...items.map(e=>keys.map(k=>k[0]==="@"?e.getAttribute(k.slice(1)):([...e.children].find(c=>c.tagName===k)?.textContent.trim()??"")))])}}
+function sqlTables(s){const out={};const re=/insert\s+into\s+[`"\[]?([\w.]+)[`"\]]?\s*(?:\(([^)]*)\))?\s*values\s*([\s\S]*?);/gi;let m;
+  const vals=v=>{const rows=[];let row=null,cur="",q=null,depth=0;for(let i=0;i<v.length;i++){const c=v[i];
+    if(q){if(c===q&&v[i+1]===q){cur+=c;i++}else if(c===q)q=null;else cur+=c;continue}
+    if(c==="'"||c==='"'){q=c;continue}if(c==="("){if(depth++===0){row=[];cur="";continue}}
+    if(c===")"){if(--depth===0){row.push(cur.trim());rows.push(row);row=null;continue}}
+    if(c===","&&depth===1){row.push(cur.trim());cur="";continue}if(depth>=1)cur+=c}return rows.map(r=>r.map(x=>x.toUpperCase()==="NULL"?"":x))};
+  while((m=re.exec(s))){const n=m[1].slice(0,31);const cols=m[2]?m[2].split(",").map(c=>c.trim().replace(/[`"\[\]]/g,"")):null;const rows=vals(m[3]);
+    if(!out[n])out[n]=cols?[cols]:[rows[0]?rows[0].map((_,i)=>"Column "+(i+1)):[]];out[n].push(...rows)}
+  return Object.entries(out).map(([name,rows])=>({name,rows:clean(rows)}))}
+function rtfText(s){let out="",i=0,depth=0,skip=-1;
+  while(i<s.length){const c=s[i];
+    if(c==="{"){depth++;if(s.startsWith("{\\*",i)&&skip<0)skip=depth;i++;continue}
+    if(c==="}"){if(skip===depth)skip=-1;depth--;i++;continue}
+    if(c==="\\"){const m=s.slice(i).match(/^\\([a-z]+)(-?\d+)? ?|^\\'([0-9a-f]{2})|^\\(.)/i);if(!m){i++;continue}i+=m[0].length;if(skip>=0)continue;
+      if(m[3]){out+=String.fromCharCode(parseInt(m[3],16));continue}if(m[4]){if("\\{}".includes(m[4]))out+=m[4];continue}
+      const w=m[1];if(w==="par"||w==="line"||w==="row")out+="\n";else if(w==="tab"||w==="cell")out+="\t";else if(w==="u"&&m[2]){out+=String.fromCharCode((+m[2]+65536)%65536);if(s[i]==="?")i++}
+      else if(["fonttbl","colortbl","stylesheet","info","pict","header","footer"].includes(w))skip=depth;continue}
+    if(skip<0&&c!=="\r"&&c!=="\n")out+=c;i++}
+  return out.replace(/\t\n/g,"\n").replace(/\n{3,}/g,"\n\n").trim()}
 function pdfRows(items){const its=items.filter(i=>i.str&&i.str.trim()).map(i=>({s:i.str,x:i.transform[4],y:i.transform[5],w:i.width}));
   its.sort((a,b)=>b.y-a.y||a.x-b.x);const lines=[];
   for(const i of its){const l=lines.find(L=>Math.abs(L.y-i.y)<3);l?l.items.push(i):lines.push({y:i.y,items:[i]})}
@@ -286,72 +375,146 @@ function pdfRows(items){const its=items.filter(i=>i.str&&i.str.trim()).map(i=>({
 const sel=it=>it.doc.sheets.filter((_,i)=>it.pick[i]);
 const xmlEsc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,"");
 const csvCell=c=>/[",\n\r]/.test(c)?`"${c.replace(/"/g,'""')}"`:c;
+const num=v=>/^-?[\d,]*\.?\d+$/.test(String(v).trim())&&String(v).trim()!==""?Number(String(v).replace(/,/g,"")):v;
+const safe=s=>String(s).replace(/[\\/:*?"<>|]/g,"_").slice(0,60);
+const uniq=(n,i)=>(safe(n).replace(/[[\]]/g,"").slice(0,28)||"Sheet")+(i?"_"+i:"");
+const isTextDoc=(d,sheets)=>d.text&&sheets.length===1&&sheets[0].rows.every(r=>r.length===1);
+const header=rows=>(rows[0]||[]).map((k,i)=>String(k||"Column "+(i+1)));
+const records=s=>{const keys=header(s.rows);return s.rows.slice(1).map(r=>Object.fromEntries(keys.map((k,i)=>[k,num(r[i]??"")])))};
+const xmlName=s=>(String(s).trim().replace(/[^\w.-]+/g,"_").replace(/^([^A-Za-z_])/,"_$1")||"field");
+const sqlId=s=>'"'+String(s).replace(/"/g,'""')+'"';
+const sqlVal=v=>{const n=num(v);return typeof n==="number"?String(n):v===""?"NULL":"'"+String(v).replace(/'/g,"''")+"'"};
+const rtfEsc=s=>String(s).replace(/[\\{}]/g,m=>"\\"+m).replace(/\n/g,"\\line ").replace(/[^\x00-\x7f]/g,c=>`\\u${c.charCodeAt(0)>32767?c.charCodeAt(0)-65536:c.charCodeAt(0)}?`);
+const texEsc=s=>String(s).replace(/[\\&%$#_{}~^]/g,m=>({"\\":"\\textbackslash{}","~":"\\textasciitilde{}","^":"\\textasciicircum{}"}[m]||"\\"+m));
+const canvasBlob=(c,type,q)=>new Promise((r,j)=>c.toBlob(b=>b?r(b):j(Error("Your browser couldn't create this image format.")),type,q));
+const MIME={png:"image/png",jpg:"image/jpeg",webp:"image/webp"};
+
+function drawTables(sheets,title){/* render tables to a canvas for PNG/JPEG/WebP */
+  const pad=10,rowH=26,font="13px Inter, system-ui, sans-serif",bold="600 13px Inter, system-ui, sans-serif";
+  const m=document.createElement("canvas").getContext("2d");const blocks=sheets.map(s=>{const rows=s.rows.slice(0,300);
+    const w=header(rows).map((_,ci)=>Math.min(320,Math.max(...rows.map((r,ri)=>{m.font=ri?font:bold;return m.measureText(String(r[ci]??"")).width}))+pad*2));return{s,rows,w}});
+  const W=Math.max(400,...blocks.map(b=>b.w.reduce((a,x)=>a+x,0)))+48;
+  const H=60+blocks.reduce((a,b)=>a+b.rows.length*rowH+(sheets.length>1?30:0)+24,0);
+  const c=document.createElement("canvas");const k=Math.min(2,Math.max(1,16000/Math.max(W,H)));c.width=Math.min(16000,W*k);c.height=Math.min(16000,H*k);
+  const g=c.getContext("2d");g.scale(k,k);g.fillStyle="#fff";g.fillRect(0,0,W,H);g.fillStyle="#020618";g.font="600 18px Inter, system-ui, sans-serif";g.fillText(title,24,36);
+  let y=56;blocks.forEach(b=>{if(sheets.length>1){g.font=bold;g.fillStyle="#45556c";g.fillText(b.s.name,24,y+16);y+=30}
+    b.rows.forEach((r,ri)=>{let x=24;if(!ri){g.fillStyle="#f1f5f9";g.fillRect(24,y,b.w.reduce((a,v)=>a+v,0),rowH)}
+      r.forEach((cell,ci)=>{const w=b.w[ci];g.strokeStyle="#cbd5e1";g.strokeRect(x,y,w,rowH);g.fillStyle="#020618";g.font=ri?font:bold;
+        let t=String(cell??"");while(t.length>1&&g.measureText(t).width>w-pad*2)t=t.slice(0,-2)+"…";g.fillText(t,x+pad,y+17);x+=w});y+=rowH});y+=24});
+  return c}
+function svgTables(sheets,title){const cw=7.2,rowH=24,pad=8;let y=50,parts=[`<text x="20" y="32" font-size="18" font-weight="600">${xmlEsc(title)}</text>`],W=400;
+  sheets.forEach(s=>{const rows=s.rows.slice(0,500);const w=header(rows).map((_,ci)=>Math.min(300,Math.max(...rows.map(r=>String(r[ci]??"").length*cw))+pad*2));
+    if(sheets.length>1){parts.push(`<text x="20" y="${y+14}" font-size="13" font-weight="600" fill="#45556c">${xmlEsc(s.name)}</text>`);y+=26}
+    rows.forEach((r,ri)=>{let x=20;r.forEach((c,ci)=>{parts.push(`<rect x="${x}" y="${y}" width="${w[ci]}" height="${rowH}" fill="${ri?"#fff":"#f1f5f9"}" stroke="#cbd5e1"/><text x="${x+pad}" y="${y+16}" font-size="12"${ri?"":' font-weight="600"'}>${xmlEsc(String(c??"").slice(0,Math.floor((w[ci]-pad*2)/cw)))}</text>`);x+=w[ci]});W=Math.max(W,x+20);y+=rowH});y+=20});
+  return`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${y+10}" viewBox="0 0 ${W} ${y+10}" font-family="Inter, system-ui, sans-serif" fill="#020618"><rect width="100%" height="100%" fill="#fff"/>${parts.join("")}</svg>`}
+
 async function write(it,fmt){
-  const name=base(it.name), d=it.doc;
-  if(d.image){
-    if(fmt==="html")return{filename:name+".html",data:`<!doctype html><meta charset="utf-8"><title>${esc(name)}</title><img src="${d.image.url}" alt="${esc(name)}" style="max-width:100%">`};
-    if(fmt==="pdf"){const{jsPDF}=window.jspdf;const o=d.image.w>d.image.h?"l":"p";const doc=new jsPDF({orientation:o,unit:"pt",format:"a4"});
-      const W=doc.internal.pageSize.getWidth()-48,H=doc.internal.pageSize.getHeight()-48,k=Math.min(W/d.image.w,H/d.image.h);
-      doc.addImage(d.image.url,d.image.fmt,24,24,d.image.w*k,d.image.h*k);return{filename:name+".pdf",data:doc.output("blob")}}
-    if(fmt==="docx")return{filename:name+".docx",data:await docx([],null,d.image)};
-    throw Error("Images convert to PDF, Word or HTML. Text extraction from images (OCR) isn't available on this page.");
+  const name=base(it.name),d=it.doc;
+  if(d.image){const im=d.image;
+    if(MIME[fmt]){const c=document.createElement("canvas");c.width=im.w;c.height=im.h;const g=c.getContext("2d");if(fmt==="jpg"){g.fillStyle="#fff";g.fillRect(0,0,im.w,im.h)}g.drawImage(im.canvas,0,0);
+      return{filename:`${name}.${fmt}`,data:await canvasBlob(c,MIME[fmt],.92)}}
+    if(fmt==="svg")return{filename:name+".svg",data:`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${im.w}" height="${im.h}" viewBox="0 0 ${im.w} ${im.h}"><image width="${im.w}" height="${im.h}" href="${im.url}"/></svg>`};
+    if(fmt==="html")return{filename:name+".html",data:`<!doctype html><meta charset="utf-8"><title>${esc(name)}</title><img src="${im.url}" alt="${esc(name)}" style="max-width:100%">`};
+    if(fmt==="pdf"){need(window.jspdf,"PDF writer");const{jsPDF}=window.jspdf;const doc=new jsPDF({orientation:im.w>im.h?"l":"p",unit:"pt",format:"a4"});
+      const W=doc.internal.pageSize.getWidth()-48,H=doc.internal.pageSize.getHeight()-48,k=Math.min(W/im.w,H/im.h);doc.addImage(im.url,"PNG",24,24,im.w*k,im.h*k);return{filename:name+".pdf",data:doc.output("blob")}}
+    if(fmt==="docx")return{filename:name+".docx",data:await docx([],null,im)};
+    if(fmt==="pptx"){need(window.PptxGenJS,"PowerPoint writer");const p=new PptxGenJS();p.layout="LAYOUT_WIDE";const s=p.addSlide();const k=Math.min(12.33/im.w,7/im.h);
+      s.addImage({data:im.url,x:(13.33-im.w*k)/2,y:(7.5-im.h*k)/2,w:im.w*k,h:im.h*k});return{filename:name+".pptx",data:await p.write({outputType:"blob"})}}
+    throw Error("Images can become PNG, JPEG, WebP, SVG, PDF, HTML, Word or PowerPoint. Reading text from images (OCR) isn't available here.");
   }
-  const sheets=sel(it);if(!sheets.length)throw Error("Select at least one worksheet.");
-  if(fmt==="xlsx"){const wb=XLSX.utils.book_new();sheets.forEach((s,i)=>XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(s.rows),uniq(s.name,i)));
-    return{filename:name+".xlsx",data:new Blob([XLSX.write(wb,{bookType:"xlsx",type:"array"})])}}
-  if(fmt==="csv"){if(sheets.length===1)return{filename:name+".csv",data:"﻿"+sheets[0].rows.map(r=>r.map(csvCell).join(",")).join("\r\n")};
-    const z=new JSZip();sheets.forEach(s=>z.file(`${name} - ${safe(s.name)}.csv`,"﻿"+s.rows.map(r=>r.map(csvCell).join(",")).join("\r\n")));return{filename:name+" (csv).zip",data:await z.generateAsync({type:"blob"})}}
-  if(fmt==="json"){const obj={};sheets.forEach(s=>{const[h,...b]=s.rows;const keys=h.map((k,i)=>k||"Column "+(i+1));obj[s.name]=b.map(r=>Object.fromEntries(keys.map((k,i)=>[k,num(r[i])])))});
-    return{filename:name+".json",data:JSON.stringify(sheets.length===1?obj[sheets[0].name]:obj,null,2)}}
-  if(fmt==="md"){const isText=sheets.length===1&&sheets[0].rows.every(r=>r.length===1)&&d.text;
-    if(isText)return{filename:name+".md",data:`# ${name}\n\n${d.text.trim()}\n`};
+  const sheets=sel(it);if(!sheets.length)throw Error("Select at least one table.");
+  const textOnly=isTextDoc(d,sheets);
+  switch(fmt){
+  case"xlsx":case"xls":case"ods":{need(window.XLSX,"spreadsheet writer");const wb=XLSX.utils.book_new();sheets.forEach((s,i)=>XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(s.rows.map(r=>r.map(num))),uniq(s.name,i)));
+    return{filename:`${name}.${fmt}`,data:new Blob([XLSX.write(wb,{bookType:fmt==="xls"?"biff8":fmt,type:"array"})])}}
+  case"csv":case"tsv":{const sep=fmt==="csv"?",":"\t";const one=s=>(fmt==="csv"?"\ufeff":"")+s.rows.map(r=>r.map(c=>fmt==="csv"?csvCell(c):String(c).replace(/[\t\n]/g," ")).join(sep)).join("\r\n");
+    if(sheets.length===1)return{filename:`${name}.${fmt}`,data:one(sheets[0])};
+    const z=new JSZip();sheets.forEach(s=>z.file(`${name} - ${safe(s.name)}.${fmt}`,one(s)));return{filename:`${name} (${fmt}).zip`,data:await z.generateAsync({type:"blob"})}}
+  case"json":{if(textOnly)return{filename:name+".json",data:JSON.stringify({title:name,text:d.text},null,2)};const o={};sheets.forEach(s=>o[s.name]=records(s));return{filename:name+".json",data:JSON.stringify(sheets.length===1?o[sheets[0].name]:o,null,2)}}
+  case"yaml":{need(window.jsyaml,"YAML writer");if(textOnly)return{filename:name+".yaml",data:jsyaml.dump({title:name,text:d.text})};const o={};sheets.forEach(s=>o[s.name]=records(s));return{filename:name+".yaml",data:jsyaml.dump(sheets.length===1?o[sheets[0].name]:o,{lineWidth:-1})}}
+  case"xml":return{filename:name+".xml",data:`<?xml version="1.0" encoding="UTF-8"?>\n<workbook name="${xmlEsc(name)}">\n`+sheets.map(s=>{const keys=header(s.rows).map(xmlName);
+      return`  <sheet name="${xmlEsc(s.name)}">\n`+s.rows.slice(1).map(r=>"    <row>"+keys.map((k,i)=>`<${k}>${xmlEsc(r[i]??"")}</${k}>`).join("")+"</row>").join("\n")+"\n  </sheet>"}).join("\n")+"\n</workbook>\n"};
+  case"sql":return{filename:name+".sql",data:`-- ${name}\n-- Prepared with SyncSheets Converter\n\n`+sheets.map(s=>{const t=sqlId(xmlName(s.name)),cols=header(s.rows);
+      return`CREATE TABLE ${t} (\n${cols.map(c=>`  ${sqlId(c)} TEXT`).join(",\n")}\n);\n`+(s.rows.length>1?`INSERT INTO ${t} (${cols.map(sqlId).join(", ")}) VALUES\n`+s.rows.slice(1).map(r=>"  ("+cols.map((_,i)=>sqlVal(r[i]??"")).join(", ")+")").join(",\n")+";\n":"")}).join("\n")};
+  case"md":{if(textOnly)return{filename:name+".md",data:`# ${name}\n\n${d.text.trim()}\n`};
     return{filename:name+".md",data:`# ${name}\n\n`+sheets.map(s=>{const[h,...b]=s.rows;const p=r=>"| "+r.map(c=>String(c).replace(/\|/g,"\\|").replace(/\n/g," ")).join(" | ")+" |";
       return(sheets.length>1?`## ${s.name}\n\n`:"")+[p(h),"|"+h.map(()=>" --- ").join("|")+"|",...b.map(p)].join("\n")}).join("\n\n")+"\n"}}
-  if(fmt==="txt")return{filename:name+".txt",data:sheets.map(s=>(sheets.length>1?`# ${s.name}\n`:"")+s.rows.map(r=>r.join("\t")).join("\n")).join("\n\n")};
-  if(fmt==="html")return{filename:name+".html",data:`<!doctype html><html><head><meta charset="utf-8"><title>${esc(name)}</title><style>body{font:14px system-ui,sans-serif;margin:24px}table{border-collapse:collapse;margin:12px 0 28px}th,td{border:1px solid #cbd5e1;padding:6px 10px;text-align:left}th{background:#f1f5f9}</style></head><body><h1>${esc(name)}</h1>`+
-    sheets.map(s=>{const[h,...b]=s.rows;return(sheets.length>1?`<h2>${esc(s.name)}</h2>`:"")+`<table><thead><tr>${h.map(c=>`<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${b.map(r=>`<tr>${r.map(c=>`<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>`}).join("")+"</body></html>"};
-  if(fmt==="pdf"){const{jsPDF}=window.jspdf;const wide=Math.max(...sheets.map(s=>s.rows[0]?.length||1))>6;const doc=new jsPDF({orientation:wide?"l":"p",unit:"pt",format:"a4"});
+  case"txt":return{filename:name+".txt",data:textOnly?d.text:sheets.map(s=>(sheets.length>1?`# ${s.name}\n`:"")+s.rows.map(r=>r.join("\t")).join("\n")).join("\n\n")};
+  case"html":return{filename:name+".html",data:`<!doctype html><html><head><meta charset="utf-8"><title>${esc(name)}</title><style>body{font:14px system-ui,sans-serif;margin:24px;max-width:1100px}table{border-collapse:collapse;margin:12px 0 28px}th,td{border:1px solid #cbd5e1;padding:6px 10px;text-align:left}th{background:#f1f5f9}</style></head><body><h1>${esc(name)}</h1>`+
+    (textOnly?d.text.split(/\n{2,}/).map(p=>`<p>${esc(p).replace(/\n/g,"<br>")}</p>`).join(""):sheets.map(s=>{const[h,...b]=s.rows;return(sheets.length>1?`<h2>${esc(s.name)}</h2>`:"")+`<table><thead><tr>${h.map(c=>`<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${b.map(r=>`<tr>${r.map(c=>`<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>`}).join(""))+"</body></html>"};
+  case"rtf":{let body=`{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Calibri;}}\\f0\\fs22{\\b\\fs32 ${rtfEsc(name)}\\par}\\par\n`;
+    if(textOnly)body+=d.text.split("\n").map(l=>rtfEsc(l)+"\\par").join("\n");
+    else sheets.forEach(s=>{if(sheets.length>1)body+=`{\\b ${rtfEsc(s.name)}\\par}`;const n=s.rows[0]?.length||1,cw=Math.floor(9000/n);
+      s.rows.forEach((r,ri)=>{body+="\\trowd\\trgaph80"+r.map((_,i)=>`\\clbrdrt\\brdrs\\clbrdrl\\brdrs\\clbrdrb\\brdrs\\clbrdrr\\brdrs\\cellx${cw*(i+1)}`).join("")+"\n"+r.map(c=>`\\pard\\intbl ${ri?"":"\\b "}${rtfEsc(c)}${ri?"":"\\b0"}\\cell`).join(" ")+"\\row\n"});body+="\\pard\\par\n"});
+    return{filename:name+".rtf",data:body+"}"}}
+  case"tex":{let b=`\\documentclass{article}\n\\usepackage[utf8]{inputenc}\n\\usepackage{longtable}\n\\title{${texEsc(name)}}\n\\date{}\n\\begin{document}\n\\maketitle\n`;
+    if(textOnly)b+=d.text.split(/\n{2,}/).map(texEsc).join("\n\n")+"\n";
+    else sheets.forEach(s=>{const n=s.rows[0]?.length||1;if(sheets.length>1)b+=`\\section*{${texEsc(s.name)}}\n`;
+      b+=`\\begin{longtable}{|${"l|".repeat(n)}}\n\\hline\n`+s.rows.map((r,i)=>r.map(c=>i?texEsc(c):`\\textbf{${texEsc(c)}}`).join(" & ")+" \\\\ \\hline"+(i?"":"\n\\endhead")).join("\n")+"\n\\end{longtable}\n"});
+    return{filename:name+".tex",data:b+"\\end{document}\n"}}
+  case"pdf":{need(window.jspdf,"PDF writer");const{jsPDF}=window.jspdf;const wide=Math.max(...sheets.map(s=>s.rows[0]?.length||1))>6;const doc=new jsPDF({orientation:wide?"l":"p",unit:"pt",format:"a4"});
+    if(textOnly){doc.setFontSize(16);doc.text(name,40,48);doc.setFontSize(10);const lines=doc.splitTextToSize(d.text,doc.internal.pageSize.getWidth()-80);let y=72;
+      lines.forEach(l=>{if(y>doc.internal.pageSize.getHeight()-40){doc.addPage();y=48}doc.text(l,40,y);y+=14});return{filename:name+".pdf",data:doc.output("blob")}}
     sheets.forEach((s,i)=>{if(i)doc.addPage();doc.setFontSize(13);doc.text(sheets.length>1?s.name:name,40,40);const[h,...b]=s.rows;
       doc.autoTable({head:[h],body:b,startY:54,styles:{fontSize:8,cellPadding:4,overflow:"linebreak"},headStyles:{fillColor:[15,23,43]},margin:{left:40,right:40}})});
     return{filename:name+".pdf",data:doc.output("blob")}}
-  if(fmt==="docx")return{filename:name+".docx",data:await docx(sheets,name,null,d.text&&sheets.every(s=>s.rows.every(r=>r.length===1))?d.text:null)};
+  case"docx":return{filename:name+".docx",data:await docx(sheets,name,null,textOnly?d.text:null)};
+  case"pptx":{need(window.PptxGenJS,"PowerPoint writer");const p=new PptxGenJS();p.layout="LAYOUT_WIDE";const t=p.addSlide();t.addText(name,{x:.6,y:2.6,w:12,h:1.2,fontSize:40,bold:true,color:"0F172B"});
+    if(textOnly){const paras=d.text.split(/\n{2,}/).filter(Boolean);for(let i=0;i<paras.length;i+=4){p.addSlide().addText(paras.slice(i,i+4).join("\n\n").slice(0,1800),{x:.6,y:.5,w:12,h:6.5,fontSize:16,valign:"top",color:"1D293D"})}}
+    else sheets.forEach(s=>{const[h,...b]=s.rows;const per=14;for(let i=0;i<Math.max(1,b.length);i+=per){const sl=p.addSlide();sl.addText(s.name+(b.length>per?` (${i/per+1})`:""),{x:.5,y:.25,w:12,h:.6,fontSize:20,bold:true,color:"0F172B"});
+      sl.addTable([h.map(c=>({text:String(c),options:{bold:true,fill:{color:"F1F5F9"}}})),...b.slice(i,i+per).map(r=>r.map(c=>String(c)))],{x:.5,y:1,w:12.3,fontSize:11,border:{type:"solid",pt:.5,color:"CBD5E1"},autoPage:false})}});
+    return{filename:name+".pptx",data:await p.write({outputType:"blob"})}}
+  case"epub":return{filename:name+".epub",data:await epub(name,sheets,textOnly?d.text:null)};
+  case"svg":return{filename:name+".svg",data:svgTables(sheets,name)};
+  case"png":case"jpg":case"webp":return{filename:`${name}.${fmt}`,data:await canvasBlob(drawTables(sheets,name),MIME[fmt],.92)};
+  }
   throw Error("Unknown output format.");
 }
-const num=v=>v!==""&&!isNaN(Number(String(v).replace(/,/g,"")))&&/^-?[\d,]*\.?\d+$/.test(String(v).trim())?Number(String(v).replace(/,/g,"")):v;
-const safe=s=>String(s).replace(/[\\/:*?"<>|]/g,"_").slice(0,60);
-function uniq(n,i){return(safe(n).replace(/[[\]]/g,"").slice(0,28)||"Sheet")+(i?"_"+i:"")}
 async function docx(sheets,title,image,text){
-  const z=new JSZip();const P=t=>`<w:p><w:r><w:t xml:space="preserve">${xmlEsc(t)}</w:t></w:r></w:p>`;
+  need(window.JSZip,"Word writer");const z=new JSZip();const P=t=>`<w:p><w:r><w:t xml:space="preserve">${xmlEsc(t)}</w:t></w:r></w:p>`;
   const H=t=>`<w:p><w:pPr><w:spacing w:after="120"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="32"/></w:rPr><w:t xml:space="preserve">${xmlEsc(t)}</w:t></w:r></w:p>`;
   const bd=`<w:tblBorders>${["top","left","bottom","right","insideH","insideV"].map(s=>`<w:${s} w:val="single" w:sz="4" w:space="0" w:color="94A3B8"/>`).join("")}</w:tblBorders>`;
   let body="",rels="";
-  if(image){const b64=image.url.split(",")[1];const e=image.fmt==="PNG"?"png":image.fmt==="WEBP"?"webp":"jpeg";z.file("word/media/image1."+e,b64,{base64:true});
-    rels=`<Relationship Id="rIdImg" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.${e}"/>`;
-    const k=Math.min(1,6000000/(image.w*9525)),cx=Math.round(image.w*9525*k),cy=Math.round(image.h*9525*k);
-    body=`<w:p><w:r><w:drawing><wp:inline><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="1" name="Image"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="1" name="Image"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rIdImg"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`;}
+  if(image){z.file("word/media/image1.png",image.url.split(",")[1],{base64:true});
+    rels=`<Relationship Id="rIdImg" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>`;
+    const k=Math.min(1,5900000/(image.w*9525)),cx=Math.round(image.w*9525*k),cy=Math.round(image.h*9525*k);
+    body=`<w:p><w:r><w:drawing><wp:inline><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="1" name="Image"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="1" name="Image"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rIdImg"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`}
   else{body=H(title);if(text)body+=text.split(/\r?\n/).map(P).join("");
     else sheets.forEach(s=>{if(sheets.length>1)body+=H(s.name);body+=`<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/>${bd}</w:tblPr>`+s.rows.map((r,ri)=>`<w:tr>${r.map(c=>`<w:tc><w:p><w:r>${ri===0?"<w:rPr><w:b/></w:rPr>":""}<w:t xml:space="preserve">${xmlEsc(c)}</w:t></w:r></w:p></w:tc>`).join("")}</w:tr>`).join("")+`</w:tbl>`+P("")})}
-  z.file("[Content_Types].xml",`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="jpeg" ContentType="image/jpeg"/><Default Extension="webp" ContentType="image/webp"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`);
+  z.file("[Content_Types].xml",`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`);
   z.file("_rels/.rels",`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`);
   z.file("word/_rels/document.xml.rels",`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels}</Relationships>`);
   z.file("word/document.xml",`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><w:body>${body}<w:sectPr/></w:body></w:document>`);
   return z.generateAsync({type:"blob",mimeType:"application/vnd.openxmlformats-officedocument.wordprocessingml.document"});
 }
+async function epub(title,sheets,text){
+  need(window.JSZip,"eBook writer");const z=new JSZip();const id="urn:uuid:"+(crypto.randomUUID?crypto.randomUUID():Date.now());
+  z.file("mimetype","application/epub+zip",{compression:"STORE"});
+  z.file("META-INF/container.xml",`<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`);
+  const chapters=text?[{name:title,html:text.split(/\n{2,}/).map(p=>`<p>${xmlEsc(p).replace(/\n/g,"<br/>")}</p>`).join("")}]:
+    sheets.map(s=>({name:s.name,html:`<table><thead><tr>${(s.rows[0]||[]).map(c=>`<th>${xmlEsc(c)}</th>`).join("")}</tr></thead><tbody>${s.rows.slice(1).map(r=>`<tr>${r.map(c=>`<td>${xmlEsc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>`}));
+  const css="body{font-family:sans-serif}table{border-collapse:collapse}th,td{border:1px solid #999;padding:4px 8px}th{background:#eee}";
+  chapters.forEach((c,i)=>z.file(`OEBPS/c${i+1}.xhtml`,`<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml"><head><title>${xmlEsc(c.name)}</title><style>${css}</style></head><body><h1>${xmlEsc(c.name)}</h1>${c.html}</body></html>`));
+  z.file("OEBPS/nav.xhtml",`<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Contents</title></head><body><nav epub:type="toc"><ol>${chapters.map((c,i)=>`<li><a href="c${i+1}.xhtml">${xmlEsc(c.name)}</a></li>`).join("")}</ol></nav></body></html>`);
+  z.file("OEBPS/content.opf",`<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="uid">${id}</dc:identifier><dc:title>${xmlEsc(title)}</dc:title><dc:language>en</dc:language><meta property="dcterms:modified">${new Date().toISOString().slice(0,19)}Z</meta></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>${chapters.map((_,i)=>`<item id="c${i+1}" href="c${i+1}.xhtml" media-type="application/xhtml+xml"/>`).join("")}</manifest><spine>${chapters.map((_,i)=>`<itemref idref="c${i+1}"/>`).join("")}</spine></package>`);
+  return z.generateAsync({type:"blob",mimeType:"application/epub+zip"});
+}
 
 /* ---------- convert ---------- */
-let busy=false;
 $("#go").onclick=async()=>{
-  const fmt=$("#fmt").value,save=$("#savesheet").checked,todo=S.files.filter(f=>f.doc);
+  const fmt=fmtVal(),save=$("#savesheet").checked,todo=S.files.filter(f=>f.doc);
   busy=true;S.results=[];$("#ressec").hidden=true;$("#overall").hidden=false;let done=0;
-  const ov=()=>{$("#ovtext").textContent=`${done} of ${todo.length} files done`;$("#ovbar").style.width=(done/todo.length*100)+"%"};ov();
+  const ov=()=>{$("#ovtext").textContent=`${done} of ${todo.length} files done`;$("#ovbar").style.width=(done/todo.length*100)+"%"};ov();renderFiles();
   for(const it of todo){
     try{setStage(it,"Converting",55,"run");await tick();
-      const out=await write(it,fmt);setStage(it,"Converting",80,"run");await tick();
+      if(it.doc.image&&!IMAGE_OK.has(fmt))throw Error(`Skipped: images can't become .${fmt}.`);
+      const out=await write(it,fmt);setStage(it,"Packaging",80,"run");await tick();
       let savedId=null;
       if(save&&!it.doc.image){setStage(it,"Saving as sheet",92,"run");await tick();
-        const rec={name:base(it.name),source:it.name,created:new Date().toISOString(),sheets:sel(it).map(s=>({name:s.name,rows:s.rows.map(r=>[...r])}))};const ex=it.savedId&&S.saved.find(x=>x.id===it.savedId);if(ex)Object.assign(ex,rec);else{it.savedId=Math.random().toString(36).slice(2);S.saved.unshift({id:it.savedId,...rec})}savedId=it.savedId;persist()}
+        const rec={name:base(it.name),source:it.name,created:new Date().toISOString(),sheets:sel(it).map(s=>({name:s.name,rows:s.rows.map(r=>[...r])}))};
+        const ex=it.savedId&&S.saved.find(x=>x.id===it.savedId);if(ex)Object.assign(ex,rec);else{it.savedId=Math.random().toString(36).slice(2);S.saved.unshift({id:it.savedId,...rec})}savedId=it.savedId;persist()}
       const size=out.data instanceof Blob?out.data.size:new Blob([out.data]).size;
-      S.results.push({it,out,size,savedId});setStage(it,`Converted to .${out.filename.split(".").pop()}${savedId?" · saved as a sheet":""}`,100,"done");
+      S.results.push({it,out,size,savedId});setStage(it,`Converted to .${fmt}${savedId?" · saved as a sheet":""}`,100,"done");
     }catch(e){it.state="err";it.err=e.message||"Conversion failed.";renderFiles()}
     done++;ov();
   }
@@ -361,8 +524,8 @@ $("#go").onclick=async()=>{
 };
 function renderResults(){
   $("#ressec").hidden=!S.results.length;$("#dlall").hidden=S.results.length<2;
-  $("#results").innerHTML=S.results.map((r,i)=>`<div class="ritem"><span class="ftype">${esc(r.out.filename.split(".").pop())}</span><span class="fname">${esc(r.out.filename)}</span><span class="fsize">${kb(r.size)}</span>
-    <button class="btn ghost small" data-prev="${i}">Preview</button><button class="btn primary small" data-dl="${i}">Download</button></div>`).join("");
+  $("#results").innerHTML=S.results.map((r,i)=>{const e=r.out.filename.split(".").pop();return`<div class="ritem"><span class="ftype">${esc(e)}</span><span class="fname">${esc(r.out.filename)}${ALLOW.has(e)?"":' <span class="muted">· saves as .zip</span>'}</span><span class="fsize">${kb(r.size)}</span>
+    <button class="btn ghost small" data-prev="${i}">Preview</button><button class="btn primary small" data-dl="${i}">Download</button></div>`}).join("");
   if(S.results[0])preview(S.results[0].it);else $("#prevwrap").innerHTML="";
 }
 $("#results").addEventListener("click",e=>{const d=e.target.closest("[data-dl]"),p=e.target.closest("[data-prev]");
@@ -371,8 +534,10 @@ $("#dlall").onclick=async()=>{const z=new JSZip();const seen={};S.results.forEac
   save({filename:"converted files.zip",data:await z.generateAsync({type:"blob"})})};
 async function save(out){
   if(!downloads){toast("Downloads aren't available in this view. Open the page in claude.ai to save files.");return}
-  try{await downloads.save({filename:out.filename,data:out.data instanceof Blob?out.data:String(out.data)});toast("Saved "+out.filename)}
-  catch(e){if(e&&e.code==="declined")return;toast(e&&e.code==="rate_limited"?"A save is already waiting for you. Finish it first.":"Couldn't save this file here.")}
+  let file=out;const e=out.filename.split(".").pop().toLowerCase();
+  if(!ALLOW.has(e)){const z=new JSZip();z.file(out.filename,out.data);file={filename:out.filename+".zip",data:await z.generateAsync({type:"blob"})}}
+  try{await downloads.save({filename:file.filename,data:file.data instanceof Blob?file.data:String(file.data)});toast("Saved "+file.filename)}
+  catch(err){if(err&&err.code==="declined")return;toast(err&&err.code==="rate_limited"?"A save is already waiting for you. Finish it first.":"Couldn't save this file here.")}
 }
 function tableHtml(rows,editable,limit){const[h=[],...b]=rows;const body=limit?b.slice(0,limit):b;
   return`<table><thead><tr>${h.map((c,ci)=>`<th${editable?` contenteditable="true" data-r="0" data-c="${ci}"`:""}>${esc(c)}</th>`).join("")}</tr></thead><tbody>${body.map((r,ri)=>`<tr>${r.map((c,ci)=>`<td${editable?` contenteditable="true" data-r="${ri+1}" data-c="${ci}"`:""}>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>`}
@@ -387,7 +552,7 @@ function renderSavedCount(){$("#scount").textContent=S.saved.length?`(${S.saved.
 function renderSaved(){
   if(!S.saved.length){$("#slist").innerHTML="";$("#sview").innerHTML=`<div class="empty">No saved sheets yet. Convert a file with “Also save as a sheet” ticked.</div>`;return}
   if(!S.saved.find(s=>s.id===openId)){openId=S.saved[0].id;openSheet=0}
-  $("#slist").innerHTML=S.saved.map(s=>`<button class="sitem" data-id="${s.id}" aria-current="${s.id===openId}"><b style="font-weight:600">${esc(s.name)}</b><br><span class="muted">${s.sheets.length} ${s.sheets.length===1?"worksheet":"worksheets"} · ${new Date(s.created).toLocaleDateString()}</span></button>`).join("");
+  $("#slist").innerHTML=S.saved.map(s=>`<button class="sitem" data-id="${s.id}" aria-current="${s.id===openId}"><b style="font-weight:600">${esc(s.name)}</b><br><span class="muted">${s.sheets.length} ${s.sheets.length===1?"table":"tables"} · ${new Date(s.created).toLocaleDateString()}</span></button>`).join("");
   const s=S.saved.find(x=>x.id===openId),ws=s.sheets[openSheet]||s.sheets[0];
   $("#sview").innerHTML=`<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:space-between"><div><h3 style="font-size:16px">${esc(s.name)}</h3><p class="muted">From ${esc(s.source)}</p></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn outline small" id="reconv">Convert again</button><button class="btn ghost small" id="sdel" style="color:var(--danger)">Delete</button></div></div>
@@ -398,11 +563,11 @@ function renderSaved(){
   document.querySelectorAll("[data-ws]").forEach(b=>b.onclick=()=>{openSheet=+b.dataset.ws;renderSaved()});
   $("#sdel").onclick=()=>{$("#layer").innerHTML=`<div style="position:fixed;inset:0;z-index:40;background:rgba(2,6,24,.45);display:grid;place-items:center;padding:16px" role="dialog" aria-modal="true" aria-labelledby="dt"><div style="background:var(--raised);border:1px solid var(--border);border-radius:14px;padding:20px;max-width:360px;width:100%;display:grid;gap:12px"><h3 id="dt" style="font-size:16px">Delete “${esc(s.name)}”?</h3><p class="muted">This removes the saved sheet from this browser.</p><div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn outline" id="dn">Cancel</button><button class="btn primary" id="dy">Delete</button></div></div></div>`;
     $("#dn").onclick=()=>$("#layer").innerHTML="";$("#dy").onclick=()=>{S.saved=S.saved.filter(x=>x.id!==s.id);persist();$("#layer").innerHTML="";renderSaved();renderSavedCount()};$("#dy").focus()};
-  $("#reconv").onclick=()=>{const it={id:Math.random().toString(36).slice(2),file:null,name:s.name+".sheet",type:"sheet",size:new Blob([JSON.stringify(s.sheets)]).size,stage:`Ready · ${describe({sheets:s.sheets})}`,pct:100,state:"ready",doc:{sheets:s.sheets.map(w=>({name:w.name,rows:w.rows.map(r=>[...r])}))},pick:s.sheets.map(()=>true)};
+  $("#reconv").onclick=()=>{const it={id:Math.random().toString(36).slice(2),file:null,name:s.name+".sheet",type:"sheet",size:new Blob([JSON.stringify(s.sheets)]).size,stage:`Ready · ${describe({sheets:s.sheets})}`,pct:100,state:"ready",doc:{sheets:s.sheets.map(w=>({name:w.name,rows:w.rows.map(r=>[...r])}))},pick:s.sheets.map(()=>true),savedId:s.id};
     S.files.push(it);showTab("convert");renderFiles();toast("Added to the files to convert")};
 }
 $("#slist").addEventListener("click",e=>{const b=e.target.closest(".sitem");if(b){openId=b.dataset.id;openSheet=0;renderSaved()}});
 
-renderFiles();renderSavedCount();
+renderFiles();renderSavedCount();updNote();
 })();
 </script>
