@@ -16,4 +16,4 @@ export type { ConsoleTemplate } from "./templates";
 export { renderText } from "./render-text";
 export { standaloneHtml } from "./html";
 export type * from "./types";
-export { widgetSchema, computeWidget, suggestWidgets, formatValue, type Widget, type WidgetResult } from "./widgets";
+export { widgetSchema, computeWidget, suggestWidgets, formatValue, formatCompact, type Widget, type WidgetResult } from "./widgets";

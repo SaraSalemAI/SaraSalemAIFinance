@@ -53,6 +53,14 @@ export function formatValue(w: Pick<Widget, "prefix" | "suffix" | "decimals">, v
   return `${w.prefix ?? ""}${v.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d })}${w.suffix ?? ""}`;
 }
 
+/** Short form for axis labels: 1234 -> 1.2K, 2500000 -> 2.5M. */
+export function formatCompact(w: Pick<Widget, "prefix" | "suffix">, v: number): string {
+  const a = Math.abs(v);
+  const [n, u] = a >= 1e9 ? [v / 1e9, "B"] : a >= 1e6 ? [v / 1e6, "M"] : a >= 1e3 ? [v / 1e3, "K"] : [v, ""];
+  const t = u ? (Math.abs(n) >= 100 ? n.toFixed(0) : n.toFixed(1).replace(/\.0$/, "")) : Number.isInteger(n) ? String(n) : n.toFixed(1);
+  return `${w.prefix ?? ""}${t}${u}${w.suffix ?? ""}`;
+}
+
 /** Computes one widget's data from the console datasets. Pure: no DOM. */
 export function computeWidget(w: Widget, datasets: Record<string, Row[]>): WidgetResult {
   const rows = datasets[w.dataset];

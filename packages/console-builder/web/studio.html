@@ -383,6 +383,8 @@ footer { color: var(--muted); font-size: 12.5px; text-align: center; }
     <section class="panel col" aria-labelledby="run-h">
       <div class="panel-head">
         <h2 id="run-h">Live console</h2>
+        <button class="btn small" id="undo" type="button" title="Undo (Ctrl+Z)" disabled>↶ Undo</button>
+        <button class="btn small" id="redo" type="button" title="Redo (Ctrl+Y)" disabled>↷ Redo</button>
         <button class="btn small" id="reportbtn" type="button">Report</button>
         <button class="btn small" id="reset" type="button">Restart</button>
       </div>
@@ -763,10 +765,18 @@ footer { color: var(--muted); font-size: 12.5px; text-align: center; }
     status.className = "ok"; status.textContent = "✓ Valid. The live console is running this spec.";
     if (!force && current && JSON.stringify(current) === JSON.stringify(r.spec)) return;
     current = r.spec; cli = r.cli;
+    pushHist(editor.value);
     markTemplate();
     $("exportbox").hidden = true;
     mount(); renderKpis(); renderData(); renderDash();
   }
+
+  const hist = []; let hpos = -1, histLock = false;
+  function syncUndo() { $("undo").disabled = hpos <= 0; $("redo").disabled = hpos >= hist.length - 1; }
+  function pushHist(txt) { if (histLock || hist[hpos] === txt) return; hist.splice(hpos + 1); hist.push(txt); if (hist.length > 60) hist.shift(); hpos = hist.length - 1; syncUndo(); }
+  function goHist(d) { const n = hpos + d; if (n < 0 || n >= hist.length) return; hpos = n; histLock = true; editor.value = hist[n]; update(true); histLock = false; syncUndo(); setNotice(d < 0 ? "Undone." : "Redone."); }
+  $("undo").onclick = () => goHist(-1); $("redo").onclick = () => goHist(1);
+  document.addEventListener("keydown", (e) => { if (!(e.ctrlKey || e.metaKey) || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return; const k = e.key.toLowerCase(); if (k === "z" && !e.shiftKey) { e.preventDefault(); goHist(-1); } else if (k === "y" || (k === "z" && e.shiftKey)) { e.preventDefault(); goHist(1); } });
 
   function loadSpec(spec, message) {
     editor.value = pretty(spec);
@@ -1217,7 +1227,7 @@ footer { color: var(--muted); font-size: 12.5px; text-align: center; }
     "Press ▶ on each step, or Run all": "اضغط ▶ على كل خطوة أو شغّل الكل", "Take it with you": "خذه معك", "Run as web app or Get web console": "شغّله كتطبيق أو احصل على الكونسول",
     "Commands": "الأوامر", "Arguments": "المُدخلات", "Actions": "الإجراءات", "Data rows": "صفوف البيانات", "Runs": "مرات التشغيل", "Failed": "فشل",
     "Build": "البناء", "Start here": "ابدأ هنا", "Library": "المكتبة", "Builder": "المُنشئ", "Upload files": "رفع ملفات", "Describe": "صِف", "Brand": "الهوية", "JSON": "JSON",
-    "Live console": "الكونسول المباشر", "Report": "تقرير", "Restart": "إعادة تشغيل", "▶ Run all steps": "▶ شغّل كل الخطوات", "Edit": "تعديل",
+    "Live console": "الكونسول المباشر", "Report": "تقرير", "↶ Undo": "↶ تراجع", "↷ Redo": "↷ إعادة", "Undone.": "تم التراجع.", "Redone.": "تمت الإعادة.", "Restart": "إعادة تشغيل", "▶ Run all steps": "▶ شغّل كل الخطوات", "Edit": "تعديل",
     "Activity": "النشاط", "Clear": "مسح", "Most used commands": "الأوامر الأكثر استخدامًا", "Recent runs": "آخر التشغيلات", "Data": "البيانات",
     "Dashboard": "لوحة المؤشرات", "Auto widgets": "مؤشرات تلقائية", "+ Add widget": "+ إضافة مؤشر", "Add to dashboard": "أضف إلى اللوحة",
     "Type": "النوع", "Title": "العنوان", "Dataset": "مجموعة البيانات", "Metric": "المقياس", "Number column": "عمود رقمي", "Group by": "تجميع حسب", "Date column": "عمود التاريخ", "Prefix / suffix": "بادئة / لاحقة",

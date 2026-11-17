@@ -1,7 +1,7 @@
 // Console builder — draws dashboard widgets in the browser with inline SVG (no chart library).
 // Prepared by Sara Salem. Copyright (c) Sara Salem 2026.
 
-import { computeWidget, formatValue, type Row, type Widget } from "./widgets";
+import { computeWidget, formatCompact, formatValue, type Row, type Widget } from "./widgets";
 
 const PALETTE = ["#2f8f7a", "#d9822b", "#3b6fb6", "#b5487a", "#7f8f2a", "#8a5cc7", "#c0563f", "#4a9bb0"];
 const NS = "http://www.w3.org/2000/svg";
@@ -31,28 +31,40 @@ function svg(tag: string, attrs: Record<string, string | number>): SVGElement {
 }
 const short = (s: string, n = 10) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
+function grid(s: SVGElement, x1: number, x2: number, top: number, bottom: number, max: number, w: Widget) {
+  for (let i = 0; i <= 3; i++) {
+    const y = bottom - ((bottom - top) * i) / 3;
+    s.append(svg("line", { x1, x2, y1: y, y2: y, stroke: "currentColor", "stroke-opacity": i ? 0.08 : 0.2 }));
+    const t = svg("text", { x: x1 - 4, y: y + 4, "text-anchor": "end" }); t.textContent = formatCompact(w, (max * i) / 3); s.append(t);
+  }
+}
+
 function bars(points: { label: string; value: number }[], w: Widget): SVGElement {
-  const W = 360, H = 180, pad = 26, max = Math.max(1, ...points.map((p) => p.value));
+  const W = 360, H = 190, padL = 40, padB = 26, top = 16, max = Math.max(1, ...points.map((p) => p.value));
   const s = svg("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": w.title });
-  const bw = (W - pad) / Math.max(1, points.length);
+  grid(s, padL, W, top, H - padB, max, w);
+  const bw = (W - padL) / Math.max(1, points.length);
   points.forEach((p, i) => {
-    const h = ((H - pad - 14) * p.value) / max;
-    const r = svg("rect", { x: pad + i * bw + 3, y: H - pad - h, width: Math.max(4, bw - 6), height: Math.max(1, h), rx: 3, fill: PALETTE[0] });
+    const h = ((H - padB - top) * p.value) / max;
+    const x = padL + i * bw + 3, y = H - padB - h;
+    const r = svg("rect", { x, y, width: Math.max(4, bw - 6), height: Math.max(1, h), rx: 3, fill: PALETTE[0] });
     const t = svg("title", {}); t.textContent = `${p.label}: ${formatValue(w, p.value)}`; r.append(t);
-    const lb = svg("text", { x: pad + i * bw + bw / 2, y: H - 8, "text-anchor": "middle" }); lb.textContent = short(p.label, Math.max(4, Math.floor(bw / 7)));
+    const lb = svg("text", { x: x + (bw - 6) / 2, y: H - 8, "text-anchor": "middle" }); lb.textContent = short(p.label, Math.max(4, Math.floor(bw / 7)));
     s.append(r, lb);
+    if (bw >= 26) { const v = svg("text", { x: x + (bw - 6) / 2, y: y - 3, "text-anchor": "middle" }); v.textContent = formatCompact(w, p.value); s.append(v); }
   });
-  const top = svg("text", { x: 0, y: 12 }); top.textContent = formatValue({ ...w, decimals: w.decimals ?? 0 }, max);
-  s.append(top, svg("line", { x1: pad, x2: W, y1: H - pad, y2: H - pad, stroke: "currentColor", "stroke-opacity": 0.2 }));
   return s;
 }
 
 function line(points: { label: string; value: number }[], w: Widget): SVGElement {
-  const W = 720, H = 200, pad = 30, max = Math.max(1, ...points.map((p) => p.value)), n = Math.max(1, points.length - 1);
+  const W = 720, H = 210, padL = 48, pad = 30, top = 16, max = Math.max(1, ...points.map((p) => p.value)), n = Math.max(1, points.length - 1);
   const s = svg("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": w.title });
-  const xy = points.map((p, i) => [pad + ((W - pad * 2) * i) / n, H - pad - ((H - pad * 2) * p.value) / max] as const);
-  s.append(svg("line", { x1: pad, x2: W - pad, y1: H - pad, y2: H - pad, stroke: "currentColor", "stroke-opacity": 0.2 }));
-  if (xy.length > 1) s.append(svg("polyline", { points: xy.map((p) => p.join(",")).join(" "), fill: "none", stroke: PALETTE[2], "stroke-width": 2.5, "stroke-linejoin": "round" }));
+  grid(s, padL, W - pad, top, H - pad, max, w);
+  const xy = points.map((p, i) => [padL + ((W - padL - pad) * i) / n, H - pad - ((H - pad - top) * p.value) / max] as const);
+  if (xy.length > 1) {
+    s.append(svg("polygon", { points: [`${xy[0][0]},${H - pad}`, ...xy.map((p) => p.join(",")), `${xy[xy.length - 1][0]},${H - pad}`].join(" "), fill: PALETTE[2], "fill-opacity": 0.12 }));
+    s.append(svg("polyline", { points: xy.map((p) => p.join(",")).join(" "), fill: "none", stroke: PALETTE[2], "stroke-width": 2.5, "stroke-linejoin": "round" }));
+  }
   const every = Math.ceil(points.length / 8);
   xy.forEach(([x, y], i) => {
     const c = svg("circle", { cx: x, cy: y, r: 3.5, fill: PALETTE[2] });
@@ -60,7 +72,6 @@ function line(points: { label: string; value: number }[], w: Widget): SVGElement
     s.append(c);
     if (i % every === 0) { const lb = svg("text", { x, y: H - 10, "text-anchor": "middle" }); lb.textContent = points[i].label; s.append(lb); }
   });
-  const top = svg("text", { x: 0, y: 14 }); top.textContent = formatValue({ ...w, decimals: w.decimals ?? 0 }, max); s.append(top);
   return s;
 }
 

@@ -45,17 +45,23 @@ export class ConsoleBuilder<C> {
     const path = [...this.prefix, ...spec.path].map((p) => p.toLowerCase());
     if (!path.length) throw new Error("Command path cannot be empty");
     const full = { ...spec, path };
-    const place = (segments: string[]) => {
+    const place = (segments: string[], alias: boolean) => {
       let node = this.root;
       for (const seg of segments) {
         if (!node.children.has(seg)) node.children.set(seg, newNode<C>(seg));
         node = node.children.get(seg)!;
       }
-      if (node.command) throw new Error(`Duplicate command: ${segments.join(" ")}`);
+      if (node.command) {
+        // An alias is only a shortcut: skip it when a real command already owns that name.
+        if (alias) return;
+        throw new Error(`Duplicate command: "${segments.join(" ")}" is defined twice. Rename one of them.`);
+      }
       node.command = full;
     };
-    place(path);
-    for (const a of spec.aliases ?? []) place([...path.slice(0, -1), a.toLowerCase()]);
+    place(path, false);
+    for (const a of new Set((spec.aliases ?? []).map((x) => x.toLowerCase()))) {
+      if (a && a !== path[path.length - 1]) place([...path.slice(0, -1), a], true);
+    }
     return this;
   }
 
