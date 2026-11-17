@@ -1,0 +1,408 @@
+<title>SyncSheets Converter</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+/* Prepared by Sara Salem. Copyright Sara Salem 2026.
+   Layout: sticky header with tabs; Convert = upload → files with progress → output → results; Saved sheets = list + editable preview. */
+:root{
+  --bg:#ffffff;--surface:#f1f5f9;--raised:#ffffff;--border:#e2e8f0;--border-input:#62748e;
+  --text:#020618;--muted:#45556c;--accent:#0f172b;--accent-hover:#1d293d;--on-accent:#f8fafc;--ring:#62748e;
+  --danger:#c10007;--success:#047857;--warning:#b45309;--bar:#2a78d6;
+  --font:"Inter",ui-sans-serif,system-ui,sans-serif;--mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --r-md:8px;--r-lg:10px;--r-xl:14px;--sh-sm:0 1px 2px rgba(2,6,24,.06);--sh-lg:0 10px 15px -3px rgba(2,6,24,.10),0 4px 6px -4px rgba(2,6,24,.10);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#020618;--surface:#1d293d;--raised:#0f172b;--border:#26334a;--border-input:#90a1b9;--text:#f8fafc;--muted:#90a1b9;
+  --accent:#e2e8f0;--accent-hover:#cad5e2;--on-accent:#0f172b;--ring:#90a1b9;--danger:#ff6467;--success:#34d399;--warning:#fbbf24;--bar:#3987e5;color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#020618;--surface:#1d293d;--raised:#0f172b;--border:#26334a;--border-input:#90a1b9;--text:#f8fafc;--muted:#90a1b9;
+  --accent:#e2e8f0;--accent-hover:#cad5e2;--on-accent:#0f172b;--ring:#90a1b9;--danger:#ff6467;--success:#34d399;--warning:#fbbf24;--bar:#3987e5;color-scheme:dark}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--text);font:400 14px/1.5 var(--font);margin:0}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:30;background:var(--bg)}
+h1,h2,h3,p{margin:0}
+:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+svg.i{width:16px;height:16px;flex-shrink:0}
+.muted{color:var(--muted);font-size:13px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.wrap{max-width:1100px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+header{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--bg);border-bottom:1px solid var(--border)}
+.hd{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-block:10px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:8px;font-weight:600;font-size:16px;letter-spacing:-.02em}
+.tabs{display:flex;gap:4px}
+.tab{display:inline-flex;align-items:center;gap:8px;border:0;background:transparent;color:var(--muted);font:500 14px var(--font);padding:9px 14px;border-radius:var(--r-md);cursor:pointer}
+.tab[aria-selected="true"]{background:var(--surface);color:var(--text)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:38px;padding:0 16px;border-radius:var(--r-md);border:1px solid transparent;font:500 14px var(--font);cursor:pointer;background:transparent;color:var(--text);white-space:nowrap}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.primary{background:var(--accent);color:var(--on-accent);box-shadow:var(--sh-sm)}
+.primary:hover:not(:disabled){background:var(--accent-hover)}
+.outline{border-color:var(--border-input);background:var(--bg)}
+.outline:hover:not(:disabled),.ghost:hover:not(:disabled){background:var(--surface)}
+.small{height:32px;padding:0 12px;font-size:13px}
+.icon{width:40px;padding:0}
+main{display:flex;flex-direction:column;gap:28px;padding-block:28px 48px}
+section>h2{font-size:20px;font-weight:600;letter-spacing:-.02em;margin-bottom:4px;text-wrap:balance}
+.step{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--accent);color:var(--on-accent);font-size:12px;font-weight:600;margin-right:8px;vertical-align:2px}
+.drop{margin-top:14px;border:1.5px dashed var(--border-input);border-radius:var(--r-xl);padding:36px 16px;display:grid;justify-items:center;gap:12px;text-align:center;background:var(--raised);transition:background .15s}
+.drop.over{background:var(--surface)}
+.drop svg.big{width:36px;height:36px}
+.fmts{font-size:12px;color:var(--muted);max-width:60ch}
+.list{display:flex;flex-direction:column;gap:10px;margin-top:14px}
+.file{border:1px solid var(--border);border-radius:var(--r-lg);background:var(--raised);padding:12px 14px;display:grid;gap:8px;min-width:0}
+.frow{display:flex;align-items:center;gap:12px;min-width:0}
+.ftype{font:600 11px var(--mono);padding:3px 7px;border-radius:6px;background:var(--surface);color:var(--muted);text-transform:uppercase;flex-shrink:0}
+.fname{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}
+.fsize{font-size:12px;color:var(--muted);flex-shrink:0;font-variant-numeric:tabular-nums}
+.prog{height:6px;border-radius:99px;background:var(--surface);overflow:hidden}
+.prog>i{display:block;height:100%;width:0;background:var(--bar);border-radius:99px;transition:width .25s}
+.prog.ok>i{background:var(--success)}.prog.err>i{background:var(--danger)}
+.stage{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+.stage.ok{color:var(--success)}.stage.err{color:var(--danger)}
+.spin{width:12px;height:12px;border:2px solid var(--border);border-top-color:var(--bar);border-radius:50%;animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+.sheets-pick{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:99px;padding:4px 10px;font-size:12px;cursor:pointer;background:transparent;color:var(--text)}
+.chip input{margin:0}
+.opts{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;margin-top:14px}
+.fld{display:grid;gap:6px;font-size:13px;font-weight:500}
+select{height:38px;border:1px solid var(--border-input);border-radius:var(--r-md);background:var(--bg);color:var(--text);font:inherit;font-size:14px;padding:0 10px;min-width:220px}
+.check{display:flex;align-items:center;gap:8px;font-size:14px;height:38px}
+.overall{display:flex;align-items:center;gap:12px;font-size:13px;color:var(--muted);margin-top:12px}
+.overall .prog{flex:1;max-width:320px}
+.res{display:flex;flex-direction:column;gap:10px;margin-top:14px}
+.ritem{border:1px solid var(--border);border-radius:var(--r-lg);background:var(--raised);padding:12px 14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.ritem .fname{flex:1 1 200px}
+.preview{border:1px solid var(--border);border-radius:var(--r-lg);overflow:auto;max-height:420px;margin-top:10px;background:var(--raised)}
+table{border-collapse:collapse;font:12px/1.35 var(--mono);min-width:100%}
+th,td{border-right:1px solid var(--border);border-bottom:1px solid var(--border);padding:6px 10px;text-align:start;white-space:nowrap;max-width:280px;overflow:hidden;text-overflow:ellipsis}
+thead th{background:var(--surface);font-weight:600;position:sticky;top:0}
+td[contenteditable="true"]:focus{outline:2px solid var(--accent);outline-offset:-2px}
+pre.txt{margin:0;padding:12px;font:12px/1.5 var(--mono);white-space:pre-wrap;word-break:break-word}
+.saved{display:grid;grid-template-columns:minmax(0,1fr);gap:16px}
+@media(min-width:900px){.saved{grid-template-columns:280px minmax(0,1fr)}}
+.slist{display:flex;flex-direction:column;gap:6px}
+.sitem{border:1px solid var(--border);border-radius:var(--r-lg);background:var(--raised);padding:10px 12px;text-align:start;cursor:pointer;color:var(--text);font:inherit}
+.sitem[aria-current="true"]{border-color:var(--accent)}
+.empty{border:1px dashed var(--border-input);border-radius:var(--r-lg);padding:32px 16px;text-align:center;color:var(--muted)}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--accent);color:var(--on-accent);padding:10px 14px;border-radius:var(--r-md);font-size:13px;box-shadow:var(--sh-lg);z-index:50;display:flex;gap:10px;align-items:center}
+.toast button{background:transparent;border:1px solid var(--on-accent);color:var(--on-accent);border-radius:6px;padding:3px 8px;font:500 12px var(--font);cursor:pointer}
+footer{border-top:1px solid var(--border);padding-block:16px;font-size:12px;color:var(--muted)}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}.prog>i{transition:none}}
+</style>
+
+<header><div class="wrap hd">
+  <div class="brand"><svg class="i" style="width:20px;height:20px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M8 13h8M8 17h8"/></svg>SyncSheets</div>
+  <nav class="tabs" role="tablist" aria-label="Sections">
+    <button class="tab" role="tab" id="t-convert" aria-selected="true" aria-controls="p-convert">Convert</button>
+    <button class="tab" role="tab" id="t-saved" aria-selected="false" aria-controls="p-saved">Saved sheets <span id="scount" class="muted"></span></button>
+  </nav>
+</div></header>
+
+<div class="wrap">
+<main id="p-convert" role="tabpanel" aria-labelledby="t-convert">
+  <section>
+    <h2><span class="step">1</span>Upload your files</h2>
+    <p class="muted">Any mix of files. Nothing leaves your browser: reading and converting happen on this page.</p>
+    <div class="drop" id="drop">
+      <svg class="big" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></svg>
+      <label class="btn primary" for="fin" style="cursor:pointer">Upload files</label>
+      <input id="fin" type="file" multiple class="sr" accept=".xlsx,.xls,.xlsm,.csv,.tsv,.ods,.json,.md,.markdown,.txt,.html,.htm,.xml,.docx,.pdf,.png,.jpg,.jpeg,.webp">
+      <p class="fmts">or drop them here · Excel · CSV · TSV · ODS · JSON · Markdown · TXT · HTML · XML · DOCX · PDF · PNG/JPG/WebP · up to 10 MB each</p>
+    </div>
+    <div class="list" id="files"></div>
+  </section>
+
+  <section>
+    <h2><span class="step">2</span>Convert to</h2>
+    <div class="opts">
+      <label class="fld">Output format
+        <select id="fmt">
+          <option value="xlsx">Excel (.xlsx)</option><option value="csv">CSV (.csv)</option>
+          <option value="md" selected>Markdown (.md)</option><option value="json">JSON (.json)</option>
+          <option value="txt">Text, tab-separated (.txt)</option><option value="html">HTML (.html)</option>
+          <option value="docx">Word (.docx)</option><option value="pdf">PDF (.pdf)</option>
+        </select></label>
+      <label class="check"><input type="checkbox" id="savesheet" checked> Also save as a sheet</label>
+      <button class="btn primary" id="go" disabled>Convert</button>
+    </div>
+    <div class="overall" id="overall" hidden><span id="ovtext"></span><div class="prog"><i id="ovbar"></i></div></div>
+  </section>
+
+  <section id="ressec" hidden>
+    <h2><span class="step">3</span>Download</h2>
+    <div class="row" style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><button class="btn outline" id="dlall">Download all (.zip)</button></div>
+    <div class="res" id="results"></div>
+    <div id="prevwrap"></div>
+  </section>
+  <footer>Prepared by Sara Salem · © Sara Salem 2026</footer>
+</main>
+
+<main id="p-saved" role="tabpanel" aria-labelledby="t-saved" hidden>
+  <section>
+    <h2>Saved sheets</h2>
+    <p class="muted">Files you converted with “Also save as a sheet”. Click a cell to edit; changes save in this browser.</p>
+    <div class="saved" style="margin-top:14px"><div class="slist" id="slist"></div><div id="sview"></div></div>
+  </section>
+  <footer>Prepared by Sara Salem · © Sara Salem 2026</footer>
+</main>
+</div>
+<div id="layer"></div>
+
+<script>
+/* Prepared by Sara Salem. Copyright Sara Salem 2026. */
+(()=>{
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const MAX=10*1024*1024, STORE="syncsheets-converter-sheets-v1";
+const kb=n=>n<1024?n+" B":n<1048576?(n/1024).toFixed(1)+" KB":(n/1048576).toFixed(1)+" MB";
+const base=n=>n.replace(/\.[^.]+$/,"");
+const ext=n=>(n.match(/\.([^.]+)$/)||[,""])[1].toLowerCase();
+const tick=()=>new Promise(r=>setTimeout(r,30));
+let downloads=null;window.claude?.use?.("downloads").then(d=>downloads=d).catch(()=>{});
+
+/* ---------- state ---------- */
+const S={files:[],results:[],saved:[]};
+try{S.saved=JSON.parse(localStorage.getItem(STORE)||"[]")}catch(e){}
+const persist=()=>{try{localStorage.setItem(STORE,JSON.stringify(S.saved))}catch(e){toast("Couldn't save in this browser (storage full or blocked).")}};
+
+/* ---------- tabs ---------- */
+function showTab(id){["convert","saved"].forEach(t=>{$("#t-"+t).setAttribute("aria-selected",t===id);$("#p-"+t).hidden=t!==id});if(id==="saved")renderSaved()}
+$("#t-convert").onclick=()=>showTab("convert");$("#t-saved").onclick=()=>showTab("saved");
+
+/* ---------- toast ---------- */
+function toast(msg,action){document.querySelectorAll(".toast").forEach(x=>x.remove());const t=document.createElement("div");t.className="toast";t.setAttribute("role","status");t.innerHTML=`<span>${esc(msg)}</span>`;
+  if(action){const b=document.createElement("button");b.textContent=action.label;b.onclick=()=>{action.fn();t.remove()};t.appendChild(b)}
+  document.body.appendChild(t);setTimeout(()=>t.remove(),action?6000:2600)}
+
+/* ---------- upload ---------- */
+const drop=$("#drop");
+["dragenter","dragover"].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.add("over")}));
+["dragleave","drop"].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.remove("over")}));
+drop.addEventListener("drop",e=>addFiles(e.dataTransfer.files));
+$("#fin").onchange=e=>{addFiles(e.target.files);e.target.value=""};
+const KNOWN={xlsx:"Excel",xls:"Excel",xlsm:"Excel",csv:"CSV",tsv:"TSV",ods:"ODS",json:"JSON",md:"Markdown",markdown:"Markdown",txt:"Text",html:"HTML",htm:"HTML",xml:"XML",docx:"Word",pdf:"PDF",png:"Image",jpg:"Image",jpeg:"Image",webp:"Image"};
+async function addFiles(list){list=Array.from(list||[]);
+  for(const f of list){
+    const it={id:Math.random().toString(36).slice(2),file:f,name:f.name,type:ext(f.name),size:f.size,stage:"Ready",pct:0,state:"idle",doc:null,pick:null,err:""};
+    if(!KNOWN[it.type]){it.state="err";it.err="This file type isn't supported."}
+    else if(f.size>MAX){it.state="err";it.err="Over the 10 MB limit."}
+    S.files.push(it);renderFiles();
+    if(it.state!=="err")await read(it);
+  }
+}
+/* read immediately so the user can pick worksheets and see the detected content */
+async function read(it){
+  try{setStage(it,"Uploading",15,"run");await tick();
+    const buf=await it.file.arrayBuffer();setStage(it,"Reading",40,"run");await tick();
+    it.doc=await parse(it,buf,p=>setStage(it,"Extracting tables",40+Math.round(p*50),"run"));
+    it.pick=it.doc.sheets.map(()=>true);
+    setStage(it,`Ready · ${describe(it.doc)}`,100,"ready");
+  }catch(e){it.state="err";it.err=e.message||"Couldn't read this file.";renderFiles()}
+}
+const describe=d=>d.image?"image":d.sheets.length+(d.sheets.length===1?" table":" tables")+" · "+d.sheets.reduce((a,s)=>a+Math.max(0,s.rows.length),0)+" rows";
+function setStage(it,stage,pct,state){it.stage=stage;it.pct=pct;if(state)it.state=state;renderFiles()}
+function renderFiles(){
+  const el=$("#files");
+  el.innerHTML=S.files.map(it=>{
+    const cls=it.state==="err"?"err":it.state==="done"||it.state==="ready"?"ok":"";
+    const pct=it.state==="err"?100:it.pct;
+    const st=it.state==="err"?`✕ ${esc(it.err)}`:(it.state==="run"?'<span class="spin" aria-hidden="true"></span>':it.state==="done"||it.state==="ready"?"✓ ":"")+esc(it.stage)+(it.state==="run"?` · ${pct}%`:"");
+    const pick=it.doc&&it.doc.sheets.length>1?`<div class="sheets-pick" aria-label="Worksheets to convert">${it.doc.sheets.map((s,i)=>`<label class="chip"><input type="checkbox" data-f="${it.id}" data-s="${i}" ${it.pick[i]?"checked":""}>${esc(s.name)}</label>`).join("")}</div>`:"";
+    return`<div class="file"><div class="frow"><span class="ftype">${esc(it.type)}</span><span class="fname" title="${esc(it.name)}">${esc(it.name)}</span><span class="fsize">${kb(it.size)}</span>
+      <button class="btn ghost small icon" data-rm="${it.id}" aria-label="Remove ${esc(it.name)}" ${busy?"disabled":""}>✕</button></div>
+      <div class="prog ${cls}" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="${esc(it.name)} progress"><i style="width:${pct}%"></i></div>
+      <div class="stage ${cls}" aria-live="polite">${st}</div>${pick}</div>`}).join("");
+  $("#go").disabled=busy||!S.files.some(f=>f.doc);
+}
+$("#files").addEventListener("click",e=>{const b=e.target.closest("[data-rm]");if(b){S.files=S.files.filter(f=>f.id!==b.dataset.rm);renderFiles()}});
+$("#files").addEventListener("change",e=>{const c=e.target.closest("input[data-f]");if(!c)return;const it=S.files.find(f=>f.id===c.dataset.f);it.pick[+c.dataset.s]=c.checked});
+
+/* ---------- parsers: every input becomes {sheets:[{name,rows}], text?, image?} ---------- */
+const td=new TextDecoder();
+const clean=rows=>{rows=rows.map(r=>r.map(c=>c==null?"":String(c)));const w=Math.max(0,...rows.map(r=>r.length));return rows.filter(r=>r.some(c=>c.trim()!=="")).map(r=>{while(r.length<w)r.push("");return r})};
+const textSheets=t=>[{name:"Text",rows:t.split(/\r?\n/).filter(l=>l.trim()).map(l=>[l])}];
+async function parse(it,buf,prog){
+  const t=it.type;
+  if(["xlsx","xls","xlsm","ods","csv","tsv"].includes(t)){
+    if(!window.XLSX)throw Error("The spreadsheet reader didn't load. Check your connection and reload.");
+    const opts={type:"array",raw:false};if(t==="tsv"){opts.type="string";opts.FS="\t"}
+    const wb=XLSX.read(t==="tsv"?td.decode(buf):buf,opts);prog(1);
+    return{sheets:wb.SheetNames.map(n=>({name:n,rows:clean(XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:false,defval:""}))})).filter(s=>s.rows.length)};
+  }
+  if(t==="json"){const j=JSON.parse(td.decode(buf));prog(1);
+    const fromArr=(a,name)=>{if(!Array.isArray(a)||!a.length)return null;if(a.every(Array.isArray))return{name,rows:clean(a)};
+      if(a.every(x=>x&&typeof x==="object")){const keys=[...new Set(a.flatMap(Object.keys))];return{name,rows:clean([keys,...a.map(o=>keys.map(k=>typeof o[k]==="object"&&o[k]!==null?JSON.stringify(o[k]):o[k]))])}}
+      return{name,rows:clean(a.map(x=>[x]))}};
+    let sheets=[];if(Array.isArray(j))sheets=[fromArr(j,"Data")];
+    else if(j&&typeof j==="object"){for(const[k,v]of Object.entries(j))if(Array.isArray(v))sheets.push(fromArr(v,k.slice(0,31)));
+      if(!sheets.filter(Boolean).length)sheets=[{name:"Data",rows:[["Key","Value"],...Object.entries(j).map(([k,v])=>[k,typeof v==="object"?JSON.stringify(v):v])]}]}
+    return{sheets:sheets.filter(Boolean)};
+  }
+  if(t==="md"||t==="markdown"){const s=td.decode(buf);prog(1);const tables=mdTables(s);return{sheets:tables.length?tables:textSheets(s),text:s}}
+  if(t==="txt"){const s=td.decode(buf);prog(1);
+    const lines=s.split(/\r?\n/).filter(l=>l.trim());const tabbed=lines.length>1&&lines.every(l=>l.includes("\t"));
+    return{sheets:tabbed?[{name:"Text",rows:clean(lines.map(l=>l.split("\t")))}]:textSheets(s),text:s}}
+  if(t==="html"||t==="htm"){const s=td.decode(buf);prog(1);const d=new DOMParser().parseFromString(s,"text/html");const tables=htmlTables(d);const text=d.body?.innerText||d.body?.textContent||"";return{sheets:tables.length?tables:textSheets(text),text}}
+  if(t==="xml"){const d=new DOMParser().parseFromString(td.decode(buf),"application/xml");if(d.querySelector("parsererror"))throw Error("This XML file isn't well-formed.");prog(1);return{sheets:[xmlTable(d)]}}
+  if(t==="docx"){if(!window.mammoth)throw Error("The Word reader didn't load. Check your connection and reload.");
+    const h=await mammoth.convertToHtml({arrayBuffer:buf});prog(.6);const raw=await mammoth.extractRawText({arrayBuffer:buf});prog(1);
+    const d=new DOMParser().parseFromString(h.value,"text/html");const tables=htmlTables(d);return{sheets:tables.length?tables:textSheets(raw.value),text:raw.value}}
+  if(t==="pdf"){if(!window.pdfjsLib)throw Error("The PDF reader didn't load. Check your connection and reload.");
+    const pdf=await pdfjsLib.getDocument({data:new Uint8Array(buf)}).promise;const sheets=[];let all="";
+    for(let p=1;p<=pdf.numPages;p++){const page=await pdf.getPage(p);const tc=await page.getTextContent();const rows=pdfRows(tc.items);
+      all+=rows.map(r=>r.join("  ")).join("\n")+"\n\n";if(rows.length)sheets.push({name:"Page "+p,rows:clean(rows)});prog(p/pdf.numPages);await tick()}
+    if(!sheets.length)throw Error("No text found in this PDF. It may be a scanned image.");
+    return{sheets,text:all}}
+  if(["png","jpg","jpeg","webp"].includes(t)){const url=await new Promise((r,j)=>{const fr=new FileReader();fr.onload=()=>r(fr.result);fr.onerror=j;fr.readAsDataURL(it.file)});
+    const dim=await new Promise(r=>{const im=new Image();im.onload=()=>r([im.naturalWidth,im.naturalHeight]);im.onerror=()=>r([800,600]);im.src=url});prog(1);
+    return{sheets:[],image:{url,w:dim[0],h:dim[1],fmt:t==="png"?"PNG":t==="webp"?"WEBP":"JPEG"}}}
+  throw Error("Unsupported file type.");
+}
+function mdTables(s){const out=[];const lines=s.split(/\r?\n/);let cur=null;
+  const cells=l=>l.trim().replace(/^\||\|$/g,"").split("|").map(c=>c.trim());
+  for(const l of lines){if(/^\s*\|.*\|\s*$/.test(l)){if(/^\s*\|?\s*:?-{2,}/.test(l.replace(/\|/g,"|"))&&/^[\s|:-]+$/.test(l))continue;(cur=cur||[]).push(cells(l))}else if(cur){out.push(cur);cur=null}}
+  if(cur)out.push(cur);return out.map((r,i)=>({name:"Table "+(i+1),rows:clean(r)}))}
+function htmlTables(d){return[...d.querySelectorAll("table")].map((t,i)=>({name:"Table "+(i+1),rows:clean([...t.querySelectorAll("tr")].map(tr=>[...tr.children].map(c=>c.textContent.trim())))})).filter(s=>s.rows.length)}
+function xmlTable(d){const root=d.documentElement;let items=[...root.children];
+  if(items.length===1&&items[0].children.length)items=[...items[0].children];
+  const keys=[...new Set(items.flatMap(e=>[...[...e.attributes].map(a=>"@"+a.name),...[...e.children].map(c=>c.tagName)]))];
+  if(!keys.length)return{name:root.tagName.slice(0,31),rows:clean([["Element","Text"],...items.map(e=>[e.tagName,e.textContent.trim()])])};
+  return{name:root.tagName.slice(0,31),rows:clean([keys,...items.map(e=>keys.map(k=>k[0]==="@"?e.getAttribute(k.slice(1)):(e.querySelector(":scope>"+CSS.escape(k))?.textContent.trim()??"")))])}}
+function pdfRows(items){const its=items.filter(i=>i.str&&i.str.trim()).map(i=>({s:i.str,x:i.transform[4],y:i.transform[5],w:i.width}));
+  its.sort((a,b)=>b.y-a.y||a.x-b.x);const lines=[];
+  for(const i of its){const l=lines.find(L=>Math.abs(L.y-i.y)<3);l?l.items.push(i):lines.push({y:i.y,items:[i]})}
+  return lines.map(L=>{L.items.sort((a,b)=>a.x-b.x);const row=[];let end=-1e9;
+    for(const i of L.items){if(row.length&&i.x-end<10)row[row.length-1]+=(i.x-end>1.5?" ":"")+i.s;else row.push(i.s);end=i.x+i.w}return row.map(c=>c.trim())})}
+
+/* ---------- writers ---------- */
+const sel=it=>it.doc.sheets.filter((_,i)=>it.pick[i]);
+const xmlEsc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,"");
+const csvCell=c=>/[",\n\r]/.test(c)?`"${c.replace(/"/g,'""')}"`:c;
+async function write(it,fmt){
+  const name=base(it.name), d=it.doc;
+  if(d.image){
+    if(fmt==="html")return{filename:name+".html",data:`<!doctype html><meta charset="utf-8"><title>${esc(name)}</title><img src="${d.image.url}" alt="${esc(name)}" style="max-width:100%">`};
+    if(fmt==="pdf"){const{jsPDF}=window.jspdf;const o=d.image.w>d.image.h?"l":"p";const doc=new jsPDF({orientation:o,unit:"pt",format:"a4"});
+      const W=doc.internal.pageSize.getWidth()-48,H=doc.internal.pageSize.getHeight()-48,k=Math.min(W/d.image.w,H/d.image.h);
+      doc.addImage(d.image.url,d.image.fmt,24,24,d.image.w*k,d.image.h*k);return{filename:name+".pdf",data:doc.output("blob")}}
+    if(fmt==="docx")return{filename:name+".docx",data:await docx([],null,d.image)};
+    throw Error("Images convert to PDF, Word or HTML. Text extraction from images (OCR) isn't available on this page.");
+  }
+  const sheets=sel(it);if(!sheets.length)throw Error("Select at least one worksheet.");
+  if(fmt==="xlsx"){const wb=XLSX.utils.book_new();sheets.forEach((s,i)=>XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(s.rows),uniq(s.name,i)));
+    return{filename:name+".xlsx",data:new Blob([XLSX.write(wb,{bookType:"xlsx",type:"array"})])}}
+  if(fmt==="csv"){if(sheets.length===1)return{filename:name+".csv",data:"﻿"+sheets[0].rows.map(r=>r.map(csvCell).join(",")).join("\r\n")};
+    const z=new JSZip();sheets.forEach(s=>z.file(`${name} - ${safe(s.name)}.csv`,"﻿"+s.rows.map(r=>r.map(csvCell).join(",")).join("\r\n")));return{filename:name+" (csv).zip",data:await z.generateAsync({type:"blob"})}}
+  if(fmt==="json"){const obj={};sheets.forEach(s=>{const[h,...b]=s.rows;const keys=h.map((k,i)=>k||"Column "+(i+1));obj[s.name]=b.map(r=>Object.fromEntries(keys.map((k,i)=>[k,num(r[i])])))});
+    return{filename:name+".json",data:JSON.stringify(sheets.length===1?obj[sheets[0].name]:obj,null,2)}}
+  if(fmt==="md"){const isText=sheets.length===1&&sheets[0].rows.every(r=>r.length===1)&&d.text;
+    if(isText)return{filename:name+".md",data:`# ${name}\n\n${d.text.trim()}\n`};
+    return{filename:name+".md",data:`# ${name}\n\n`+sheets.map(s=>{const[h,...b]=s.rows;const p=r=>"| "+r.map(c=>String(c).replace(/\|/g,"\\|").replace(/\n/g," ")).join(" | ")+" |";
+      return(sheets.length>1?`## ${s.name}\n\n`:"")+[p(h),"|"+h.map(()=>" --- ").join("|")+"|",...b.map(p)].join("\n")}).join("\n\n")+"\n"}}
+  if(fmt==="txt")return{filename:name+".txt",data:sheets.map(s=>(sheets.length>1?`# ${s.name}\n`:"")+s.rows.map(r=>r.join("\t")).join("\n")).join("\n\n")};
+  if(fmt==="html")return{filename:name+".html",data:`<!doctype html><html><head><meta charset="utf-8"><title>${esc(name)}</title><style>body{font:14px system-ui,sans-serif;margin:24px}table{border-collapse:collapse;margin:12px 0 28px}th,td{border:1px solid #cbd5e1;padding:6px 10px;text-align:left}th{background:#f1f5f9}</style></head><body><h1>${esc(name)}</h1>`+
+    sheets.map(s=>{const[h,...b]=s.rows;return(sheets.length>1?`<h2>${esc(s.name)}</h2>`:"")+`<table><thead><tr>${h.map(c=>`<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${b.map(r=>`<tr>${r.map(c=>`<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>`}).join("")+"</body></html>"};
+  if(fmt==="pdf"){const{jsPDF}=window.jspdf;const wide=Math.max(...sheets.map(s=>s.rows[0]?.length||1))>6;const doc=new jsPDF({orientation:wide?"l":"p",unit:"pt",format:"a4"});
+    sheets.forEach((s,i)=>{if(i)doc.addPage();doc.setFontSize(13);doc.text(sheets.length>1?s.name:name,40,40);const[h,...b]=s.rows;
+      doc.autoTable({head:[h],body:b,startY:54,styles:{fontSize:8,cellPadding:4,overflow:"linebreak"},headStyles:{fillColor:[15,23,43]},margin:{left:40,right:40}})});
+    return{filename:name+".pdf",data:doc.output("blob")}}
+  if(fmt==="docx")return{filename:name+".docx",data:await docx(sheets,name,null,d.text&&sheets.every(s=>s.rows.every(r=>r.length===1))?d.text:null)};
+  throw Error("Unknown output format.");
+}
+const num=v=>v!==""&&!isNaN(Number(String(v).replace(/,/g,"")))&&/^-?[\d,]*\.?\d+$/.test(String(v).trim())?Number(String(v).replace(/,/g,"")):v;
+const safe=s=>String(s).replace(/[\\/:*?"<>|]/g,"_").slice(0,60);
+function uniq(n,i){return(safe(n).replace(/[[\]]/g,"").slice(0,28)||"Sheet")+(i?"_"+i:"")}
+async function docx(sheets,title,image,text){
+  const z=new JSZip();const P=t=>`<w:p><w:r><w:t xml:space="preserve">${xmlEsc(t)}</w:t></w:r></w:p>`;
+  const H=t=>`<w:p><w:pPr><w:spacing w:after="120"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="32"/></w:rPr><w:t xml:space="preserve">${xmlEsc(t)}</w:t></w:r></w:p>`;
+  const bd=`<w:tblBorders>${["top","left","bottom","right","insideH","insideV"].map(s=>`<w:${s} w:val="single" w:sz="4" w:space="0" w:color="94A3B8"/>`).join("")}</w:tblBorders>`;
+  let body="",rels="";
+  if(image){const b64=image.url.split(",")[1];const e=image.fmt==="PNG"?"png":image.fmt==="WEBP"?"webp":"jpeg";z.file("word/media/image1."+e,b64,{base64:true});
+    rels=`<Relationship Id="rIdImg" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.${e}"/>`;
+    const k=Math.min(1,6000000/(image.w*9525)),cx=Math.round(image.w*9525*k),cy=Math.round(image.h*9525*k);
+    body=`<w:p><w:r><w:drawing><wp:inline><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="1" name="Image"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="1" name="Image"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rIdImg"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`;}
+  else{body=H(title);if(text)body+=text.split(/\r?\n/).map(P).join("");
+    else sheets.forEach(s=>{if(sheets.length>1)body+=H(s.name);body+=`<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/>${bd}</w:tblPr>`+s.rows.map((r,ri)=>`<w:tr>${r.map(c=>`<w:tc><w:p><w:r>${ri===0?"<w:rPr><w:b/></w:rPr>":""}<w:t xml:space="preserve">${xmlEsc(c)}</w:t></w:r></w:p></w:tc>`).join("")}</w:tr>`).join("")+`</w:tbl>`+P("")})}
+  z.file("[Content_Types].xml",`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="jpeg" ContentType="image/jpeg"/><Default Extension="webp" ContentType="image/webp"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`);
+  z.file("_rels/.rels",`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`);
+  z.file("word/_rels/document.xml.rels",`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels}</Relationships>`);
+  z.file("word/document.xml",`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><w:body>${body}<w:sectPr/></w:body></w:document>`);
+  return z.generateAsync({type:"blob",mimeType:"application/vnd.openxmlformats-officedocument.wordprocessingml.document"});
+}
+
+/* ---------- convert ---------- */
+let busy=false;
+$("#go").onclick=async()=>{
+  const fmt=$("#fmt").value,save=$("#savesheet").checked,todo=S.files.filter(f=>f.doc);
+  busy=true;S.results=[];$("#ressec").hidden=true;$("#overall").hidden=false;let done=0;
+  const ov=()=>{$("#ovtext").textContent=`${done} of ${todo.length} files done`;$("#ovbar").style.width=(done/todo.length*100)+"%"};ov();
+  for(const it of todo){
+    try{setStage(it,"Converting",55,"run");await tick();
+      const out=await write(it,fmt);setStage(it,"Converting",80,"run");await tick();
+      let savedId=null;
+      if(save&&!it.doc.image){setStage(it,"Saving as sheet",92,"run");await tick();
+        const rec={name:base(it.name),source:it.name,created:new Date().toISOString(),sheets:sel(it).map(s=>({name:s.name,rows:s.rows.map(r=>[...r])}))};const ex=it.savedId&&S.saved.find(x=>x.id===it.savedId);if(ex)Object.assign(ex,rec);else{it.savedId=Math.random().toString(36).slice(2);S.saved.unshift({id:it.savedId,...rec})}savedId=it.savedId;persist()}
+      const size=out.data instanceof Blob?out.data.size:new Blob([out.data]).size;
+      S.results.push({it,out,size,savedId});setStage(it,`Converted to .${out.filename.split(".").pop()}${savedId?" · saved as a sheet":""}`,100,"done");
+    }catch(e){it.state="err";it.err=e.message||"Conversion failed.";renderFiles()}
+    done++;ov();
+  }
+  busy=false;renderFiles();renderResults();renderSavedCount();
+  const n=S.results.filter(r=>r.savedId).length;
+  if(n)toast(`${n} ${n===1?"file":"files"} saved as ${n===1?"a sheet":"sheets"}`,{label:"Open sheets",fn:()=>showTab("saved")});
+};
+function renderResults(){
+  $("#ressec").hidden=!S.results.length;$("#dlall").hidden=S.results.length<2;
+  $("#results").innerHTML=S.results.map((r,i)=>`<div class="ritem"><span class="ftype">${esc(r.out.filename.split(".").pop())}</span><span class="fname">${esc(r.out.filename)}</span><span class="fsize">${kb(r.size)}</span>
+    <button class="btn ghost small" data-prev="${i}">Preview</button><button class="btn primary small" data-dl="${i}">Download</button></div>`).join("");
+  if(S.results[0])preview(S.results[0].it);else $("#prevwrap").innerHTML="";
+}
+$("#results").addEventListener("click",e=>{const d=e.target.closest("[data-dl]"),p=e.target.closest("[data-prev]");
+  if(d)save(S.results[+d.dataset.dl].out);if(p)preview(S.results[+p.dataset.prev].it)});
+$("#dlall").onclick=async()=>{const z=new JSZip();const seen={};S.results.forEach(r=>{let n=r.out.filename;if(seen[n])n=base(n)+` (${++seen[n]}).`+n.split(".").pop();else seen[n]=1;z.file(n,r.out.data)});
+  save({filename:"converted files.zip",data:await z.generateAsync({type:"blob"})})};
+async function save(out){
+  if(!downloads){toast("Downloads aren't available in this view. Open the page in claude.ai to save files.");return}
+  try{await downloads.save({filename:out.filename,data:out.data instanceof Blob?out.data:String(out.data)});toast("Saved "+out.filename)}
+  catch(e){if(e&&e.code==="declined")return;toast(e&&e.code==="rate_limited"?"A save is already waiting for you. Finish it first.":"Couldn't save this file here.")}
+}
+function tableHtml(rows,editable,limit){const[h=[],...b]=rows;const body=limit?b.slice(0,limit):b;
+  return`<table><thead><tr>${h.map((c,ci)=>`<th${editable?` contenteditable="true" data-r="0" data-c="${ci}"`:""}>${esc(c)}</th>`).join("")}</tr></thead><tbody>${body.map((r,ri)=>`<tr>${r.map((c,ci)=>`<td${editable?` contenteditable="true" data-r="${ri+1}" data-c="${ci}"`:""}>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>`}
+function preview(it){const d=it.doc;let h=`<h3 style="font-size:15px;margin-top:18px">Preview · ${esc(it.name)}</h3>`;
+  if(d.image)h+=`<div class="preview" style="padding:12px"><img src="${d.image.url}" alt="${esc(it.name)}" style="max-width:100%;max-height:380px"></div>`;
+  else sel(it).forEach(s=>{h+=`<p class="muted" style="margin-top:10px">${esc(s.name)} · ${s.rows.length} rows${s.rows.length>21?" · first 20 shown":""}</p><div class="preview">${tableHtml(s.rows,false,20)}</div>`});
+  $("#prevwrap").innerHTML=h}
+
+/* ---------- saved sheets ---------- */
+let openId=null,openSheet=0;
+function renderSavedCount(){$("#scount").textContent=S.saved.length?`(${S.saved.length})`:""}
+function renderSaved(){
+  if(!S.saved.length){$("#slist").innerHTML="";$("#sview").innerHTML=`<div class="empty">No saved sheets yet. Convert a file with “Also save as a sheet” ticked.</div>`;return}
+  if(!S.saved.find(s=>s.id===openId)){openId=S.saved[0].id;openSheet=0}
+  $("#slist").innerHTML=S.saved.map(s=>`<button class="sitem" data-id="${s.id}" aria-current="${s.id===openId}"><b style="font-weight:600">${esc(s.name)}</b><br><span class="muted">${s.sheets.length} ${s.sheets.length===1?"worksheet":"worksheets"} · ${new Date(s.created).toLocaleDateString()}</span></button>`).join("");
+  const s=S.saved.find(x=>x.id===openId),ws=s.sheets[openSheet]||s.sheets[0];
+  $("#sview").innerHTML=`<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:space-between"><div><h3 style="font-size:16px">${esc(s.name)}</h3><p class="muted">From ${esc(s.source)}</p></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn outline small" id="reconv">Convert again</button><button class="btn ghost small" id="sdel" style="color:var(--danger)">Delete</button></div></div>
+    ${s.sheets.length>1?`<div class="sheets-pick" style="margin-top:10px">${s.sheets.map((w,i)=>`<button class="chip" data-ws="${i}" style="${i===openSheet?"border-color:var(--accent);font-weight:600":""}">${esc(w.name)}</button>`).join("")}</div>`:""}
+    <div class="preview" id="sgrid">${tableHtml(ws.rows,true)}</div><p class="muted" style="margin-top:8px">${ws.rows.length} rows · edits save automatically</p>`;
+  $("#sgrid").addEventListener("blur",e=>{const c=e.target.closest("[data-r]");if(!c)return;ws.rows[+c.dataset.r][+c.dataset.c]=c.textContent;persist()},true);
+  $("#sgrid").addEventListener("keydown",e=>{if(e.key==="Enter"&&e.target.matches("[contenteditable]")){e.preventDefault();e.target.blur()}});
+  document.querySelectorAll("[data-ws]").forEach(b=>b.onclick=()=>{openSheet=+b.dataset.ws;renderSaved()});
+  $("#sdel").onclick=()=>{$("#layer").innerHTML=`<div style="position:fixed;inset:0;z-index:40;background:rgba(2,6,24,.45);display:grid;place-items:center;padding:16px" role="dialog" aria-modal="true" aria-labelledby="dt"><div style="background:var(--raised);border:1px solid var(--border);border-radius:14px;padding:20px;max-width:360px;width:100%;display:grid;gap:12px"><h3 id="dt" style="font-size:16px">Delete “${esc(s.name)}”?</h3><p class="muted">This removes the saved sheet from this browser.</p><div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn outline" id="dn">Cancel</button><button class="btn primary" id="dy">Delete</button></div></div></div>`;
+    $("#dn").onclick=()=>$("#layer").innerHTML="";$("#dy").onclick=()=>{S.saved=S.saved.filter(x=>x.id!==s.id);persist();$("#layer").innerHTML="";renderSaved();renderSavedCount()};$("#dy").focus()};
+  $("#reconv").onclick=()=>{const it={id:Math.random().toString(36).slice(2),file:null,name:s.name+".sheet",type:"sheet",size:new Blob([JSON.stringify(s.sheets)]).size,stage:`Ready · ${describe({sheets:s.sheets})}`,pct:100,state:"ready",doc:{sheets:s.sheets.map(w=>({name:w.name,rows:w.rows.map(r=>[...r])}))},pick:s.sheets.map(()=>true)};
+    S.files.push(it);showTab("convert");renderFiles();toast("Added to the files to convert")};
+}
+$("#slist").addEventListener("click",e=>{const b=e.target.closest(".sitem");if(b){openId=b.dataset.id;openSheet=0;renderSaved()}});
+
+renderFiles();renderSavedCount();
+})();
+</script>
