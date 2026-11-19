@@ -5,16 +5,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { IS_STATIC } from "@/lib/env";
 import { makeT } from "@/lib/i18n";
 import { DOC_LABELS, TIE_LABELS } from "@/lib/labels";
-import { autoAdvance, autoEligible, remembered, runPipeline } from "@/lib/ingest/auto";
+import { applyAiMappings, autoEligible, remembered, runPipeline } from "@/lib/ingest/auto";
 import { ALL_CATEGORIES, batchChecks, UNLOCKS, type BatchItem } from "@/lib/ingest/checks";
 import { allFields, requiredFields, type CsvCategory } from "@/lib/ingest/erp";
 import { applyStaged, expandFiles, stageUnit, type Staged, type TbRole, type Unit } from "@/lib/ingest/stage";
 import type { DocCategory } from "@/lib/finance/types";
-import { toRun, validateCompany } from "@/lib/ingest/validate";
-import { computeCompany } from "@/lib/workspace/compute";
 import { uid } from "@/lib/workspace/defaults";
 import { newCompany, useFormat, useL, useWorkspace } from "@/lib/workspace/store";
-import type { Automation, Company, ImportRun } from "@/lib/workspace/types";
+import type { Automation, ImportRun } from "@/lib/workspace/types";
 import { aiStatus } from "./AiPanel";
 import { Banner, Card, Pill } from "./ui";
 
@@ -52,31 +50,6 @@ const PHASES: Array<[Phase, string, string]> = [
   ["mapping", "Mapping accounts", "ربط الحسابات"],
   ["validating", "Validating", "التحقق"],
 ];
-
-/** Applies the AI's account suggestions: confident ones are accepted, the rest wait for review. Never overrides a confirmed mapping. */
-function applyAiMappings(c: Company, mappings: Array<{ code: string; category: string; confidence: number }>, threshold: number, runId: string) {
-  let accepted = 0;
-  let suggested = 0;
-  const byCode = new Map(mappings.filter((m) => m.category !== "UNMAPPED").map((m) => [m.code, m]));
-  const rows = c.rows.map((r) => {
-    const m = byCode.get(r.code);
-    if (!m || (r.category && !r.suggested)) return r;
-    if (r.suggested && r.category && (r.confidence ?? 0) >= m.confidence) return r;
-    if (m.confidence >= threshold) {
-      accepted++;
-      return { ...r, category: m.category as typeof r.category, suggested: false, confidence: m.confidence, mappingRule: `ai · auto-accepted ≥${threshold}%` };
-    }
-    suggested++;
-    return { ...r, category: m.category as typeof r.category, suggested: true, confidence: m.confidence, mappingRule: "ai suggestion" };
-  });
-  let next: Company = { ...c, rows };
-  if (next.automation.autoAdvance) next = autoAdvance(next);
-  const k = computeCompany(next);
-  const vrun = toRun(validateCompany(next, k), "import + AI mapping", next.tolerance, `${runId}-v`);
-  const importRuns = next.importRuns.map((r) => (r.id === runId ? { ...r, autoMapped: r.autoMapped + accepted, aiSuggested: suggested, stillToMap: next.rows.filter((x) => x.suggested || !x.category).length, statusAfter: next.period.status } : r));
-  const validationRuns = next.validationRuns.some((v) => v.id === vrun.id) ? next.validationRuns.map((v) => (v.id === vrun.id ? vrun : v)) : [...next.validationRuns, vrun].slice(-30);
-  return { company: { ...next, importRuns, validationRuns }, accepted, suggested };
-}
 
 const name = (u: Unit) => (u.sheet ? `${u.fileName} › ${u.sheet}` : u.fileName);
 const toBase64 = (b: Uint8Array) => {
@@ -210,7 +183,11 @@ function BulkUploadInner({ compact = false, incoming = null, onIncomingDone, onP
         held.push({ name: name(extra.row.unit), reason: `another ${role}-period trial balance (${name(tbs[0].row.unit)}) was used; choose which one to import` });
       }
     }
+    // Held files stay listed for the analyst but are not ticked, so the preview below shows only what was chosen.
+    const heldIds = new Set(results.filter((r) => !eligible.some((x) => x.row.unit.id === r.row.unit.id)).map((r) => r.row.unit.id));
+    if (heldIds.size) setRows((rs) => rs.map((r) => (heldIds.has(r.unit.id) ? { ...r, include: false } : r)));
     if (!eligible.length) {
+      setLastRun({ id: "", at: new Date().toISOString(), by: ws.profile.name, files: [], held, autoMapped: 0, aiSuggested: 0, stillToMap: company.rows.filter((r) => r.suggested || !r.category).length, statusAfter: company.period.status });
       setPhase(null);
       return;
     }
@@ -392,12 +369,12 @@ function BulkUploadInner({ compact = false, incoming = null, onIncomingDone, onP
         <div className="mapping-panel grid">
           <label className="field">
             <span>{L("Auto-accept mappings at or above (%)", "قبول الربط تلقائيًا عند أو فوق (٪)")}</span>
-            <input type="number" min={50} max={101} defaultValue={company.automation.autoMapThreshold} onBlur={(e) => setAutomation({ autoMapThreshold: Math.min(101, Math.max(50, Number(e.target.value) || 85)) })} />
+            <input key={`${company.id}:${company.automation.autoMapThreshold}`} type="number" min={50} max={101} defaultValue={company.automation.autoMapThreshold} onBlur={(e) => setAutomation({ autoMapThreshold: Math.min(101, Math.max(50, Number(e.target.value) || 85)) })} />
             <span className="muted small">{L("101 = never accept automatically", "١٠١ = لا قبول تلقائي")}</span>
           </label>
           <label className="field">
             <span>{L("Minimum recognition confidence to import a file (%)", "أدنى ثقة تعرف لاستيراد ملف (٪)")}</span>
-            <input type="number" min={0} max={100} defaultValue={company.automation.minConfidence} onBlur={(e) => setAutomation({ minConfidence: Math.min(100, Math.max(0, Number(e.target.value) || 0)) })} />
+            <input key={`${company.id}:${company.automation.minConfidence}`} type="number" min={0} max={100} defaultValue={company.automation.minConfidence} onBlur={(e) => setAutomation({ minConfidence: Math.min(100, Math.max(0, Number(e.target.value) || 0)) })} />
           </label>
           <label className="field">
             <span>
@@ -426,7 +403,7 @@ function BulkUploadInner({ compact = false, incoming = null, onIncomingDone, onP
       )}
       {lastRun && (
         <Banner kind={lastRun.held.length || lastRun.stillToMap ? "warning" : "ok"}>
-          <strong>{L("Done", "تم")}:</strong> {L(`${lastRun.files.length} file(s) imported`, `استيراد ${lastRun.files.length} ملف`)}
+          <strong>{lastRun.files.length ? L("Done", "تم") : L("Nothing imported automatically", "لم يُستورد شيء تلقائيًا")}:</strong> {L(`${lastRun.files.length} file(s) imported`, `استيراد ${lastRun.files.length} ملف`)}
           {lastRun.autoMapped > 0 && <> · {L(`${lastRun.autoMapped} mapping(s) accepted automatically`, `قبول ${lastRun.autoMapped} ربط تلقائيًا`)}</>}
           {lastRun.aiSuggested > 0 && <> · {L(`${lastRun.aiSuggested} AI suggestion(s) to review`, `${lastRun.aiSuggested} اقتراح ذكاء اصطناعي للمراجعة`)}</>}
           {lastRun.stillToMap > 0 && <> · <Link href="/mapping">{L(`${lastRun.stillToMap} account(s) still to map`, `${lastRun.stillToMap} حساب يحتاج ربط`)}</Link></>}
@@ -614,7 +591,7 @@ function BulkUploadInner({ compact = false, incoming = null, onIncomingDone, onP
               {report.currencies.map((ccy) => (
                 <label key={ccy} className="small">
                   1 {ccy} ={" "}
-                  <input type="number" min={0} step="0.0001" style={{ width: 100 }} defaultValue={company.fxRates[ccy] ?? ""} onBlur={(e) => Number(e.target.value) > 0 && setFx(ccy, Number(e.target.value))} />
+                  <input key={`${company.id}:${ccy}:${company.fxRates[ccy] ?? ""}`} type="number" min={0} step="0.0001" style={{ width: 100 }} defaultValue={company.fxRates[ccy] ?? ""} onBlur={(e) => Number(e.target.value) > 0 && setFx(ccy, Number(e.target.value))} />
                 </label>
               ))}
             </div>

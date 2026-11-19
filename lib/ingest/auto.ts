@@ -4,6 +4,7 @@ import type { BatchItem } from "./checks";
 import type { Unit } from "./stage";
 import { applyStaged } from "./stage";
 import { summarise, toRun, validateCompany } from "./validate";
+import type { Category } from "../finance/types";
 
 /**
  * The automatic pipeline behind "upload and it's done": recognised files are imported, mappings
@@ -103,6 +104,31 @@ export function runPipeline(c: Company, items: Array<BatchItem & { unit: Unit }>
     statusAfter: next.period.status,
   };
   return { company: { ...next, importRuns: [...next.importRuns, run].slice(-20), validationRuns: [...next.validationRuns, vrun].slice(-30) }, run };
+}
+
+/** Applies the AI's account suggestions: confident ones are accepted, the rest wait for review. Never overrides a confirmed mapping. */
+export function applyAiMappings(c: Company, mappings: Array<{ code: string; category: string; confidence: number }>, threshold: number, runId: string) {
+  let accepted = 0;
+  let suggested = 0;
+  const byCode = new Map(mappings.filter((m) => m.category !== "UNMAPPED").map((m) => [m.code, m]));
+  const rows = c.rows.map((r) => {
+    const m = byCode.get(r.code);
+    if (!m || (r.category && !r.suggested)) return r;
+    if (r.suggested && r.category && (r.confidence ?? 0) >= m.confidence) return r;
+    if (m.confidence >= threshold) {
+      accepted++;
+      return { ...r, category: m.category as Category, suggested: false, confidence: m.confidence, mappingRule: `ai · auto-accepted ≥${threshold}%` };
+    }
+    suggested++;
+    return { ...r, category: m.category as Category, suggested: true, confidence: m.confidence, mappingRule: "ai suggestion" };
+  });
+  let next: Company = { ...c, rows };
+  if (next.automation.autoAdvance) next = autoAdvance(next);
+  const k = computeCompany(next);
+  const vrun = toRun(validateCompany(next, k), "import + AI mapping", next.tolerance, `${runId}-v`);
+  const importRuns = next.importRuns.map((r) => (r.id === runId ? { ...r, autoMapped: r.autoMapped + accepted, aiSuggested: suggested, stillToMap: next.rows.filter((x) => x.suggested || !x.category).length, statusAfter: next.period.status } : r));
+  const validationRuns = next.validationRuns.some((v) => v.id === vrun.id) ? next.validationRuns.map((v) => (v.id === vrun.id ? vrun : v)) : [...next.validationRuns, vrun].slice(-30);
+  return { company: { ...next, importRuns, validationRuns }, accepted, suggested };
 }
 
 export { summarise };

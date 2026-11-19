@@ -159,3 +159,27 @@ describe("email intake", () => {
     expect(sameSecret("", "")).toBe(false);
   });
 });
+
+describe("AI mapping after import", () => {
+  it("accepts confident AI answers, leaves the rest for review and never overrides a confirmed mapping", async () => {
+    const { applyAiMappings } = await import("@/lib/ingest/auto");
+    const c = sampleCompany();
+    const [a, b, d] = c.rows;
+    c.rows = c.rows.map((r) => (r.code === a.code ? { ...r, category: "" as never, suggested: false } : r.code === b.code ? { ...r, category: "" as never, suggested: false } : r));
+    c.importRuns = [{ id: "run1", at: "", by: "t", files: [], held: [], autoMapped: 0, aiSuggested: 0, stillToMap: 2, statusAfter: "DRAFT" }];
+    const out = applyAiMappings(c, [
+      { code: a.code, category: a.category, confidence: 95 },
+      { code: b.code, category: b.category, confidence: 60 },
+      { code: d.code, category: "UNMAPPED", confidence: 10 },
+      { code: c.rows[3].code, category: "REVENUE", confidence: 99 },
+    ], 85, "run1");
+    expect(out.accepted).toBe(1);
+    expect(out.suggested).toBe(1);
+    const row = (code: string) => out.company.rows.find((r) => r.code === code)!;
+    expect(row(a.code)).toMatchObject({ category: a.category, suggested: false });
+    expect(row(b.code)).toMatchObject({ category: b.category, suggested: true, confidence: 60 });
+    expect(row(c.rows[3].code).category).toBe(c.rows[3].category);
+    expect(out.company.importRuns[0]).toMatchObject({ autoMapped: 1, aiSuggested: 1, stillToMap: 1 });
+    expect(out.company.validationRuns.at(-1)?.id).toBe("run1-v");
+  });
+});

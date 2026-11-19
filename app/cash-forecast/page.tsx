@@ -29,6 +29,7 @@ export default function CashForecastPage() {
         min={opts.min}
         max={opts.max}
         disabled={locked}
+        key={`${company?.id}:${value}`}
         defaultValue={value ?? ""}
         placeholder={opts.allowEmpty ? L("from the trial balance", "من الميزان") : undefined}
         onBlur={(e) => {

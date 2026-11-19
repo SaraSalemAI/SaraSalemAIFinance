@@ -57,6 +57,7 @@ export function ValidationReport({ compact = false }: { compact?: boolean }) {
               min={0.01}
               step={0.01}
               style={{ width: 90 }}
+              key={`${company.id}:${company.tolerance}`}
               defaultValue={company.tolerance}
               disabled={locked}
               onBlur={(e) => {
