@@ -47,9 +47,9 @@ export function itemsToLines(items: Item[]): string[] {
 
 /**
  * Joins pages into one text. A table that runs over a page break repeats its header on the next page:
- * when a page's column header (the line near the top with the most columns, so a "Title   Page 1"
- * line above it is not mistaken for it) matches the table in progress, and the lines above it name
- * the same table once page numbers are ignored, the header and those lines are dropped and the rows
+ * when a page's column header (the line near the top with the most columns whose cells are all words,
+ * so neither a "Title   Page 1" line above it nor a transaction row is mistaken for it) matches the
+ * table in progress, and the lines above it name the same table once page numbers are ignored, the header and those lines are dropped and the rows
  * continue the same table. A page whose title differs (another account) or that has no matching
  * header starts a new table, separated by a blank line.
  */
@@ -57,11 +57,15 @@ export function joinPages(pages: string[][]): string[] {
   const TOP = 8;
   const norm = (l: string) => l.replace(/\s+/g, " ").trim();
   const cells = (l: string) => l.trim().split(/\s{2,}/).length;
+  // A column header names its columns in words: a line with a cell that is only a number, date or amount
+  // (a transaction row such as "01/01   POS   Cairo   10") is never taken as the header.
+  const numeric = (c: string) => /^[-+(]?[\d٠-٩.,/:\-]+\)?%?$/.test(c.trim());
   const headerAt = (page: string[]) => {
     let best = -1;
     page.slice(0, TOP).forEach((l, i) => {
-      if (cells(l) < 2) return;
-      if (best < 0 || cells(l) > cells(page[best]) || (cells(l) === cells(page[best]) && /\d/.test(page[best]) && !/\d/.test(l))) best = i;
+      const cs = l.trim().split(/\s{2,}/);
+      if (cs.length < 2 || cs.some(numeric)) return;
+      if (best < 0 || cs.length > cells(page[best]) || (cs.length === cells(page[best]) && /\d/.test(page[best]) && !/\d/.test(l))) best = i;
     });
     return best;
   };

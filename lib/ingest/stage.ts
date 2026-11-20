@@ -32,6 +32,8 @@ export interface Unit {
   encoding: string;
   detection: Detection;
   month: { label: string; end: string } | null;
+  /** Index of the file in the list given to expandFiles that this unit came from (also for units unpacked from a .zip). */
+  source?: number;
 }
 
 export interface Staged {
@@ -166,7 +168,11 @@ export async function expandFiles(files: Array<{ name: string; bytes: Uint8Array
       errors.push(`${name}: ${(e as Error).message}`);
     }
   };
-  for (const f of files) await add(f.name, f.bytes);
+  for (const [i, f] of files.entries()) {
+    const from = units.length;
+    await add(f.name, f.bytes);
+    for (const u of units.slice(from)) u.source = i;
+  }
   return { units, errors };
 }
 

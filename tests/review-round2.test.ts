@@ -7,6 +7,7 @@ import { tbIdentity } from "@/lib/ingest/auto";
 import { normaliseTable } from "@/lib/ingest/erp";
 import { readOds } from "@/lib/ingest/formats";
 import { joinPages } from "@/lib/ingest/pdf";
+import { expandFiles } from "@/lib/ingest/stage";
 import { computeCompany, periodChecks } from "@/lib/workspace/compute";
 import { newCompany } from "@/lib/workspace/defaults";
 import { fiscalYearStart, rollForwardCompany } from "@/lib/workspace/period";
@@ -103,5 +104,24 @@ describe("asset register at the year-end roll", () => {
     expect(next.period.start).toBe("2026-01-01");
     expect(next.subledgers.far[0].accumulatedDepreciation).toBe(assetSchedule(asset, "2025-01-01", "2025-12-31").accumulatedDepreciation);
     expect(next.subledgers.far[0].accumulatedDepreciation).toBe(120);
+  });
+});
+
+describe("review round 3", () => {
+  it("keeps identical transactions on two pages when a row has more columns than the header", () => {
+    const page = ["Date   Description   Amount", "01/01   POS   Cairo   10"];
+    const out = joinPages([page, page]);
+    expect(out.filter((l) => l.startsWith("01/01")).length).toBe(2);
+    expect(out.filter((l) => l.startsWith("Date")).length).toBe(1);
+  });
+
+  it("traces units unpacked from a zip back to the zip", async () => {
+    const zip = zipSync({ "bank.csv": strToU8("Date,Description,Amount\n2025-01-01,POS,10\n") });
+    const { units } = await expandFiles([
+      { name: "tb.csv", bytes: strToU8("Code,Name,Debit,Credit\n1000,Cash,10,0\n") },
+      { name: "pack.zip", bytes: zip },
+    ]);
+    expect(units.find((u) => u.fileName === "bank.csv")?.source).toBe(1);
+    expect(units.find((u) => u.fileName === "tb.csv")?.source).toBe(0);
   });
 });
