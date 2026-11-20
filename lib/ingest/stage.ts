@@ -79,7 +79,7 @@ const BINARY = /\.(xlsx|xlsm|xls|xlsb|ods|docx|dbf|pdf|png|jpe?g|webp|gif|heic|z
  * fixed-width text are turned into tables; digital PDFs have their text layer read. Scanned PDFs
  * and photos stay as units for AI text recognition.
  */
-export async function expandFiles(files: Array<{ name: string; bytes: Uint8Array }>): Promise<{ units: Unit[]; errors: string[] }> {
+export async function expandFiles(files: Array<{ name: string; bytes: Uint8Array }>): Promise<{ units: Unit[]; errors: string[]; failedSources: number[] }> {
   const units: Unit[] = [];
   const errors: string[] = [];
 
@@ -168,12 +168,17 @@ export async function expandFiles(files: Array<{ name: string; bytes: Uint8Array
       errors.push(`${name}: ${(e as Error).message}`);
     }
   };
+  // A file with any error while reading it (an archive entry that could not be read, among others) is
+  // listed in failedSources, so it is never counted as fully imported.
+  const failedSources: number[] = [];
   for (const [i, f] of files.entries()) {
     const from = units.length;
+    const errorsBefore = errors.length;
     await add(f.name, f.bytes);
     for (const u of units.slice(from)) u.source = i;
+    if (errors.length > errorsBefore) failedSources.push(i);
   }
-  return { units, errors };
+  return { units, errors, failedSources };
 }
 
 const PARSERS = {

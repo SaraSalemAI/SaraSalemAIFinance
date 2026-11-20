@@ -125,3 +125,16 @@ describe("review round 3", () => {
     expect(units.find((u) => u.fileName === "tb.csv")?.source).toBe(0);
   });
 });
+
+describe("review round 4", () => {
+  it("flags a zip whose entries only partly expand as failed", async () => {
+    const zip = zipSync({ "bank.csv": strToU8("Date,Description,Amount\n2025-01-01,POS,10\n"), "book.xlsb": strToU8("binary") });
+    const { units, errors, failedSources } = await expandFiles([
+      { name: "tb.csv", bytes: strToU8("Code,Name,Debit,Credit\n1000,Cash,10,0\n") },
+      { name: "pack.zip", bytes: zip },
+    ]);
+    expect(units.some((u) => u.fileName === "bank.csv" && u.source === 1)).toBe(true);
+    expect(errors.some((e) => e.includes("book.xlsb"))).toBe(true);
+    expect(failedSources).toEqual([1]);
+  });
+});

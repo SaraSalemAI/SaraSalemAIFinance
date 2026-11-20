@@ -252,9 +252,10 @@ function BulkUploadInner({ compact = false, incoming = null, onIncomingDone, onP
     setAiNote("");
     setPhase("reading");
     const files = await Promise.all([...list].map(async (file) => ({ name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) })));
-    const { units, errors: errs } = await expandFiles(files);
+    const { units, errors: errs, failedSources } = await expandFiles(files);
     // Each unit carries the index of the file it came from (a .zip's entries included), so this run knows which handed-in files it fully imported.
-    const sources = [...list].map((file, i) => ({ file, unitIds: units.filter((u) => u.source === i).map((u) => u.id) }));
+    // A file that had a read error (e.g. a .zip with an entry that could not be read) gets no unit IDs, so it never counts as done.
+    const sources = [...list].map((file, i) => ({ file, unitIds: failedSources.includes(i) ? [] : units.filter((u) => u.source === i).map((u) => u.id) }));
     setErrors(errs);
     setPhase("detecting");
     const fresh: Row[] = defaultRoles(
