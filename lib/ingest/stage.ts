@@ -65,6 +65,8 @@ export function decodeText(bytes: Uint8Array): { text: string; encoding: string 
 let counter = 0;
 const unitId = () => `u${Date.now().toString(36)}${(counter++).toString(36)}`;
 
+const MAX_ARCHIVE_FILES = 200;
+
 const isOle = (b: Uint8Array) => b[0] === 0xd0 && b[1] === 0xcf && b[2] === 0x11 && b[3] === 0xe0;
 const BINARY = /\.(xlsx|xlsm|xls|xlsb|ods|docx|dbf|pdf|png|jpe?g|webp|gif|heic|zip)$/i;
 
@@ -93,7 +95,8 @@ export async function expandFiles(files: Array<{ name: string; bytes: Uint8Array
         bytes,
         sha256: sha256Bytes(new TextEncoder().encode(sh.csv)),
         encoding: via,
-        detection: detectFile(sheetName ? `${sh.name} ${name}` : name, sh.csv),
+        // Every sheet is CSV by now, even when it came from .json or .xml: detect it as CSV.
+        detection: detectFile((sheetName ? `${sh.name} ${name}` : name).replace(/\.(json|xml)$/i, ".csv"), sh.csv),
         month: monthFromName(label),
       });
     }
@@ -120,11 +123,21 @@ export async function expandFiles(files: Array<{ name: string; bytes: Uint8Array
     units.push({ id: unitId(), fileName: name, text, bytes, sha256: sha256Bytes(bytes), encoding, detection, month: monthFromName(name) });
   };
 
-  const add = async (name: string, bytes: Uint8Array): Promise<void> => {
+  // One budget for the whole drop: unzipArchive unpacks one nested level itself, and a .zip it returns
+  // from deeper down is refused rather than unpacked again with a fresh limit.
+  let archiveBudget = MAX_ARCHIVE_FILES;
+  const add = async (name: string, bytes: Uint8Array, depth = 0): Promise<void> => {
     const lower = name.toLowerCase();
     try {
       if (lower.endsWith(".zip")) {
-        for (const e of unzipArchive(bytes)) await add(e.name, e.bytes);
+        if (depth > 0) {
+          errors.push(`${name}: archives nested more than two levels deep are not unpacked`);
+          return;
+        }
+        const entries = unzipArchive(bytes);
+        if (entries.length > archiveBudget) throw new Error(`The archives hold more than ${MAX_ARCHIVE_FILES} files in total.`);
+        archiveBudget -= entries.length;
+        for (const e of entries) await add(e.name, e.bytes, depth + 1);
       } else if (/\.(xlsx|xlsm)$/.test(lower)) pushSheets(name, bytes, readXlsx(bytes), "xlsx");
       else if (lower.endsWith(".xlsb")) errors.push(`${name}: binary .xlsb workbooks are not supported; save as .xlsx`);
       else if (lower.endsWith(".xls")) {
@@ -140,7 +153,8 @@ export async function expandFiles(files: Array<{ name: string; bytes: Uint8Array
         } catch {
           pdf = null;
         }
-        if (pdf?.csv) pushSheets(name, bytes, [{ name: "PDF text", csv: pdf.csv, rows: pdf.csv.split("\n").filter(Boolean).length }], "pdf text");
+        if (pdf?.truncated) errors.push(`${name}: the PDF has ${pdf.pages} pages and only the first 200 can be read, so the table would be incomplete. Split it into smaller PDFs and upload those.`);
+        else if (pdf?.csv) pushSheets(name, bytes, [{ name: "PDF text", csv: pdf.csv, rows: pdf.csv.split("\n").filter(Boolean).length }], "pdf text");
         else units.push({ id: unitId(), fileName: name, text: null, bytes, sha256: sha256Bytes(bytes), encoding: "binary", detection: { ...detectFile(name, null), reason: pdf?.hasText ? "PDF text found but no table: needs text recognition (OCR)" : "Scanned PDF: needs text recognition (OCR)" }, month: monthFromName(name) });
       } else if (BINARY.test(lower)) {
         units.push({ id: unitId(), fileName: name, text: null, bytes, sha256: sha256Bytes(bytes), encoding: "binary", detection: detectFile(name, null), month: monthFromName(name) });

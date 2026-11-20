@@ -351,6 +351,8 @@ export function normaliseTable(text: string, category: CsvCategory, columnMap: R
   const erp = detectErp(table[h0]);
   const headers = merged.slice();
   const assigned = new Set<number>();
+  /** Fields the analyst matched by hand: derived values never replace them. */
+  const mapped = new Set<string>();
 
   // 1. Analyst's saved matches: field -> source header.
   for (const [field, source] of Object.entries(columnMap)) {
@@ -358,7 +360,30 @@ export function normaliseTable(text: string, category: CsvCategory, columnMap: R
     if (i >= 0 && source) {
       headers[i] = canonical(category, field);
       assigned.add(i);
+      mapped.add(canonical(category, field));
     }
+  }
+  // 1b. A trial balance that names its closing columns ("Closing Debit") uses them as the balance, even
+  // when bare "Debit"/"Credit" columns (the period movements) come first.
+  if (category === "TRIAL_BALANCE") {
+    for (const field of ["current_debit", "current_credit"]) {
+      if (headers.some((h, j) => assigned.has(j) && h === canonical(category, field))) continue;
+      const list = (SYNONYMS.TRIAL_BALANCE[field] ?? []).map(headerKey);
+      const i = headers.findIndex((h, j) => !assigned.has(j) && list.includes(h));
+      if (i >= 0) {
+        headers[i] = canonical(category, field);
+        assigned.add(i);
+      }
+    }
+    const closingSet = ["current_debit", "current_credit"].every((f) => headers.some((h, j) => assigned.has(j) && h === canonical(category, f)));
+    if (closingSet)
+      for (const [mov, period] of [["debit", "period_debit"], ["credit", "period_credit"], ["dr", "period_debit"], ["cr", "period_credit"], ["مدين", "period_debit"], ["دائن", "period_credit"]]) {
+        const i = headers.findIndex((h, j) => !assigned.has(j) && h === mov);
+        if (i >= 0 && !headers.includes(period)) {
+          headers[i] = period;
+          assigned.add(i);
+        }
+      }
   }
   // A plain "Account" column holding "1200 · Accounts receivable" is code and name together.
   headers.forEach((h, j) => {
@@ -414,17 +439,25 @@ export function normaliseTable(text: string, category: CsvCategory, columnMap: R
     } else if (needName) headers[acc] = nameKey.toLowerCase();
   }
 
+  // A signed amount that cannot be read is an error, not a zero: the file is held with the rows named.
+  const unreadable: string[] = [];
+  const signed = (raw: string, n: number, what: string) => {
+    const v = parseAmount(raw);
+    if (v === null && raw.trim() !== "") unreadable.push(`row ${start + n + 1} (${what} "${raw.trim().slice(0, 20)}")`);
+    return v ?? 0;
+  };
+
   // Signed closing balance instead of closing debit/credit (Odoo "End balance", QuickBooks/Dynamics "Balance").
   const bal = idx("__balance");
-  const explicitClosing = SYNONYMS.TRIAL_BALANCE.current_debit.map(headerKey).some((k) => merged.includes(k));
+  const explicitClosing = SYNONYMS.TRIAL_BALANCE.current_debit.map(headerKey).some((k) => merged.includes(k)) || mapped.has("current_debit") || mapped.has("current_credit");
   if (category === "TRIAL_BALANCE" && bal >= 0 && !explicitClosing) {
     const dr = colFor("current_debit");
     const cr = colFor("current_credit");
     if (dr >= 0) headers[dr] = "period_debit";
     if (cr >= 0) headers[cr] = "period_credit";
     headers.push("current_debit", "current_credit");
-    rows = rows.map((r) => {
-      const v = parseAmount(r[bal]) ?? 0;
+    rows = rows.map((r, n) => {
+      const v = signed(r[bal], n, "balance");
       return [...r, v > 0 ? String(v) : "0", v < 0 ? String(-v) : "0"];
     });
     derived.push(dr >= 0 ? "closing debit/credit from the end balance (debit/credit columns are period movements)" : "closing debit/credit from the signed balance");
@@ -434,8 +467,8 @@ export function normaliseTable(text: string, category: CsvCategory, columnMap: R
   const amt = idx("__amount");
   if (category === "GENERAL_LEDGER" && amt >= 0 && colFor("debit") < 0 && colFor("credit") < 0) {
     headers.push("debit", "credit");
-    rows = rows.map((r) => {
-      const v = parseAmount(r[amt]) ?? 0;
+    rows = rows.map((r, n) => {
+      const v = signed(r[amt], n, "amount");
       return [...r, v > 0 ? String(v) : "0", v < 0 ? String(-v) : "0"];
     });
     derived.push("debit/credit from the signed amount");
@@ -462,9 +495,14 @@ export function normaliseTable(text: string, category: CsvCategory, columnMap: R
     const code = colFor("accountCode");
     if (code >= 0) rows = rows.filter((r) => r[code] !== "" || !/total/i.test(r.join(" ")));
   }
+  if (unreadable.length) throw new Error(`Amounts that could not be read: ${unreadable.slice(0, 5).join(", ")}${unreadable.length > 5 ? ` and ${unreadable.length - 5} more` : ""}. Fix them in the file and upload it again.`);
   if (category === "TRIAL_BALANCE") {
+    // Summary lines have no account code and a total label ("TOTAL", "Grand total", "المجموع"); an
+    // account such as "2100 Total deposits" keeps its code and is kept.
     const name = colFor("name");
-    rows = rows.filter((r) => !(name >= 0 && /^(total|الإجمالي|المجموع)\b/i.test(r[name])));
+    const code = colFor("code");
+    const totalLabel = /^\s*(grand\s+)?(total|الإجمالي|الاجمالي|المجموع|إجمالي|اجمالي)(?=$|[\s:\-–—])/i;
+    rows = rows.filter((r) => !(name >= 0 && (code < 0 || !r[code]) && totalLabel.test(r[name])));
   }
 
   const out = [headers.map(cell).join(","), ...rows.map((r) => r.map(cell).join(","))].join("\n") + "\n";

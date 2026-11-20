@@ -39,7 +39,9 @@ function headerScore(headers: string[], category: CsvCategory): number {
   const has = (field: string) => (aliases[field] ?? [field.toLowerCase()]).some((a) => set.has(headerKey(a)));
   const req = requiredFields(category);
   const optional = Object.keys(aliases).filter((k) => !req.includes(k) && !k.startsWith("__"));
-  const reqHit = req.filter(has).length / Math.max(1, req.length);
+  // A trial balance with one signed closing balance ("End Balance") and an account code has both closing sides.
+  const signedClosing = category === "TRIAL_BALANCE" && !has("current_debit") && !has("current_credit") && has("__balance") && has("code");
+  const reqHit = req.filter((f) => has(f) || (signedClosing && (f === "current_debit" || f === "current_credit"))).length / Math.max(1, req.length);
   const optHit = optional.filter(has).length / Math.max(1, optional.length);
   let score = reqHit * 0.75 + optHit * 0.25;
   const d = DISCRIMINATORS[category];
@@ -65,7 +67,9 @@ export function detectFile(fileName: string, text: string | null): Detection {
   if (isMt940(src)) return { category: "BANK_STATEMENT", confidence: 98, reason: "SWIFT MT940 statement", alternatives: [], format: "mt940" };
   if (isOfx(src)) return { category: "BANK_STATEMENT", confidence: 98, reason: "OFX bank statement", alternatives: [], format: "ofx" };
   if (/\.(json|xml)$/.test(lower) || src.startsWith("{") || src.startsWith("[") || src.startsWith("<")) {
-    const eta = /uuid|internalId|dateTimeIssued|taxTotals|<document/i.test(src.slice(0, 20000));
+    // An ETA export has an invoice identifier plus fields only e-invoices carry; one generic name such as "internalId" is not enough.
+    const head = src.slice(0, 20000);
+    const eta = /<document\b/i.test(head) || (/uuid|internalId/i.test(head) && /dateTimeIssued|taxTotals?\b|["<]documentType\b|["<]issuer\b|["<]receiver\b|totalSalesAmount/i.test(head));
     return { category: eta ? "ETA_INVOICE" : null, confidence: eta ? 95 : 0, reason: eta ? "ETA e-invoice export" : "JSON/XML without ETA document fields", alternatives: [], format: eta ? "eta" : "unknown" };
   }
 
@@ -90,9 +94,11 @@ export function detectFile(fileName: string, text: string | null): Detection {
   };
 }
 
+/** English names match as whole words ("Summary" is not March); Arabic names match anywhere. */
+const month = (en: string, ar: string) => new RegExp(`(?<![a-z])(${en})(?![a-z])|${ar}`, "i");
 const MONTHS: Array<[RegExp, number]> = [
-  [/jan(uary)?|يناير/i, 1], [/feb(ruary)?|فبراير/i, 2], [/mar(ch)?|مارس/i, 3], [/apr(il)?|أبريل|ابريل/i, 4], [/may|مايو/i, 5], [/jun(e)?|يونيو/i, 6],
-  [/jul(y)?|يوليو/i, 7], [/aug(ust)?|أغسطس|اغسطس/i, 8], [/sep(t(ember)?)?|سبتمبر/i, 9], [/oct(ober)?|أكتوبر|اكتوبر/i, 10], [/nov(ember)?|نوفمبر/i, 11], [/dec(ember)?|ديسمبر/i, 12],
+  [month("jan(uary)?", "يناير"), 1], [month("feb(ruary)?", "فبراير"), 2], [month("mar(ch)?", "مارس"), 3], [month("apr(il)?", "أبريل|ابريل"), 4], [month("may", "مايو"), 5], [month("june?", "يونيو"), 6],
+  [month("july?", "يوليو"), 7], [month("aug(ust)?", "أغسطس|اغسطس"), 8], [month("sep(t(ember)?)?", "سبتمبر"), 9], [month("oct(ober)?", "أكتوبر|اكتوبر"), 10], [month("nov(ember)?", "نوفمبر"), 11], [month("dec(ember)?", "ديسمبر"), 12],
 ];
 
 /** Month a file is for, from names like "TB 2025-03.csv", "tb_202503", "TB March 2025" or "ميزان مارس ٢٠٢٥". */

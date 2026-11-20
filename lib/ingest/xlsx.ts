@@ -57,9 +57,9 @@ function dateStyles(stylesXml: string | undefined): Set<number> {
   return out;
 }
 
-/** Excel serial (1900 date system) to ISO date. */
-export function serialToIso(serial: number): string {
-  const ms = Math.round((serial - 25569) * 86_400_000);
+/** Excel serial to ISO date. Workbooks set to the 1904 date system count from 1904-01-01 (serial 0), 1,462 days later. */
+export function serialToIso(serial: number, date1904 = false): string {
+  const ms = Math.round((serial + (date1904 ? 1462 : 0) - 25569) * 86_400_000);
   return new Date(ms).toISOString().slice(0, 10);
 }
 
@@ -72,7 +72,9 @@ export function csvCell(v: string): string {
  * apart later; the CSV parser ignores them otherwise.
  */
 export function gridToSheet(name: string, grid: Array<string[] | undefined>): Sheet {
-  const width = Math.max(0, ...grid.filter((r): r is string[] => !!r).map((r) => r.length));
+  // A loop rather than Math.max(...rows): spreading one argument per row overflows on large sheets.
+  let width = 0;
+  for (const r of grid) if (r && r.length > width) width = r.length;
   let last = grid.length - 1;
   while (last >= 0 && !(grid[last] ?? []).some((x) => (x ?? "").trim() !== "")) last--;
   const lines = Array.from({ length: last + 1 }, (_, i) => {
@@ -102,6 +104,8 @@ export function readXlsx(bytes: Uint8Array): Sheet[] {
   }
   const shared = [...(text("xl/sharedStrings.xml") ?? "").matchAll(/<si\b[^>]*>([\s\S]*?)<\/si>/g)].map((m) => texts(m[1]));
   const dates = dateStyles(text("xl/styles.xml"));
+  const pr = workbook.match(/<workbookPr\b[^>]*>/)?.[0] ?? "";
+  const date1904 = /\bdate1904="(1|true)"/.test(pr);
 
   const sheets: Sheet[] = [];
   for (const m of workbook.matchAll(/<sheet\b[^>]*\/?>/g)) {
@@ -129,7 +133,7 @@ export function readXlsx(bytes: Uint8Array): Sheet[] {
         else if (v !== undefined) {
           const num = Number(v);
           const style = Number(attr(a, "s") ?? -1);
-          value = dates.has(style) && Number.isFinite(num) && num > 0 ? serialToIso(num) : v;
+          value = dates.has(style) && Number.isFinite(num) && (num > 0 || (date1904 && num === 0)) ? serialToIso(num, date1904) : v;
         }
         cells[idx] = value;
       }

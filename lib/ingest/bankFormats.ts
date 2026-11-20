@@ -62,24 +62,41 @@ export function parseMt940(text: string): { lines: RawBankLine[]; opening: numbe
   return { lines, opening, closing, currency };
 }
 
-/** OFX / QFX statement (SGML 1.x or XML 2.x): one <STMTTRN> per line, <LEDGERBAL> for the closing balance. */
+/**
+ * OFX / QFX statement (SGML 1.x or XML 2.x): one <STMTTRN> per line, <LEDGERBAL> for the closing balance.
+ * A file with statements for several accounts, or a line whose amount cannot be read, is refused
+ * rather than merged or imported as zero. Running balances are rebuilt from the ledger balance only
+ * when its as-of date is the last line's date, or the transaction list runs up to that date.
+ */
 export function parseOfx(text: string): { lines: RawBankLine[]; closing: number | null; currency: string | null } {
   const tag = (block: string, name: string) => block.match(new RegExp(`<${name}>\\s*([^<\\r\\n]*)`, "i"))?.[1]?.trim() ?? "";
   const date = (s: string) => (/^\d{8}/.test(s) ? `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}` : "");
+  const statements = (text.match(/<(?:CC)?STMTRS>/gi) ?? []).length;
+  if (statements > 1) throw new Error(`This OFX file holds ${statements} account statements. Export one account per file so each account keeps its own balance.`);
   const blocks = [...text.matchAll(/<STMTTRN>([\s\S]*?)(?=<\/STMTTRN>|<STMTTRN>|<\/BANKTRANLIST>)/gi)].map((m) => m[1]);
+  const bad: number[] = [];
   const lines = blocks
-    .map((b) => ({
-      date: date(tag(b, "DTPOSTED")),
-      description: [tag(b, "NAME"), tag(b, "MEMO")].filter(Boolean).join(" — ") || tag(b, "TRNTYPE"),
-      amount: round2(Number(tag(b, "TRNAMT")) || 0),
-      balance: null as number | null,
-    }))
-    .filter((l) => l.date)
-    .sort((a, b) => a.date.localeCompare(b.date));
+    .map((b, i) => {
+      const raw = tag(b, "TRNAMT").replace(/,/g, "");
+      const amount = raw ? Number(raw) : NaN;
+      const d = date(tag(b, "DTPOSTED"));
+      if (d && !Number.isFinite(amount)) bad.push(i + 1);
+      return { date: d, description: [tag(b, "NAME"), tag(b, "MEMO")].filter(Boolean).join(" — ") || tag(b, "TRNTYPE"), amount: round2(amount), balance: null as number | null };
+    })
+    .filter((l) => l.date);
+  if (bad.length) throw new Error(`OFX transaction${bad.length > 1 ? "s" : ""} ${bad.slice(0, 10).join(", ")}${bad.length > 10 ? "…" : ""} ha${bad.length > 1 ? "ve" : "s"} a missing or unreadable amount (TRNAMT).`);
+  lines.sort((a, b) => a.date.localeCompare(b.date));
   const ledger = text.match(/<LEDGERBAL>([\s\S]*?)(<\/LEDGERBAL>|<AVAILBAL>|$)/i)?.[1] ?? "";
   const closingRaw = tag(ledger, "BALAMT");
-  const closing = closingRaw ? Number(closingRaw) : null;
-  if (closing !== null && lines.length) {
+  const closing = closingRaw && Number.isFinite(Number(closingRaw)) ? Number(closingRaw) : null;
+  const asOf = date(tag(ledger, "DTASOF"));
+  const listEnd = date(tag(text.match(/<BANKTRANLIST>([\s\S]*?)<STMTTRN>/i)?.[1] ?? "", "DTEND"));
+  const last = lines.length ? lines[lines.length - 1].date : "";
+  // The ledger balance is the balance after the last line only if it is dated that day, or later with
+  // the transaction list running up to it. A balance dated before the last line, or after the list
+  // ends, describes a different point in time, so the running balances stay unknown.
+  const linked = !asOf || asOf === last || (asOf > last && !!listEnd && listEnd >= asOf);
+  if (closing !== null && lines.length && linked) {
     let run = closing;
     for (let i = lines.length - 1; i >= 0; i--) {
       lines[i].balance = round2(run);

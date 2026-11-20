@@ -225,6 +225,9 @@ export function readXls(bytes: Uint8Array): Sheet[] {
 
 // ------------------------------------------------------------------ OpenDocument
 
+const ODS_MAX_COLUMNS = 2000;
+const ODS_MAX_ROWS = 200_000;
+
 export function readOds(bytes: Uint8Array): Sheet[] {
   let xml: string;
   try {
@@ -234,21 +237,32 @@ export function readOds(bytes: Uint8Array): Sheet[] {
   }
   const sheets: Sheet[] = [];
   for (const t of xml.matchAll(/<table:table\b([^>]*)>([\s\S]*?)<\/table:table>/g)) {
-    const grid: string[][] = [];
+    const name = decodeXml(attr(t[1], "table:name") ?? `Sheet${sheets.length + 1}`);
+    // Repeats are kept as runs, and only trailing empty runs (padding to the sheet edge) are dropped,
+    // so a blank cell or row between data keeps every later value in its own column and row.
+    const rowRuns: Array<{ cells: string[]; n: number }> = [];
     for (const row of t[2].matchAll(/<table:table-row\b([^>]*?)(?:\/>|>([\s\S]*?)<\/table:table-row>)/g)) {
-      const cells: string[] = [];
+      const runs: Array<{ v: string; n: number }> = [];
       for (const c of (row[2] ?? "").matchAll(/<table:(?:covered-)?table-cell\b([^>]*?)(?:\/>|>([\s\S]*?)<\/table:(?:covered-)?table-cell>)/g)) {
         const a = c[1];
         const type = attr(a, "office:value-type");
         let v = type === "date" ? (attr(a, "office:date-value") ?? "").slice(0, 10) : type && type !== "string" ? (attr(a, "office:value") ?? attr(a, "office:boolean-value") ?? "") : "";
         if (!v) v = [...(c[2] ?? "").matchAll(/<text:p\b[^>]*>([\s\S]*?)<\/text:p>/g)].map((m) => decodeXml(m[1])).join(" ");
-        const rep = Math.min(Number(attr(a, "table:number-columns-repeated") ?? 1), v ? 1000 : 1);
-        for (let k = 0; k < rep; k++) cells.push(v);
+        runs.push({ v, n: Math.max(1, Number(attr(a, "table:number-columns-repeated") ?? 1) || 1) });
       }
-      const rep = Math.min(Number(attr(row[1], "table:number-rows-repeated") ?? 1), cells.some(Boolean) ? 1000 : 1);
-      for (let k = 0; k < rep; k++) grid.push(cells);
+      while (runs.length && !runs[runs.length - 1].v) runs.pop();
+      const width = runs.reduce((s, r) => s + r.n, 0);
+      if (width > ODS_MAX_COLUMNS) throw new Error(`Sheet "${name}" is wider than ${ODS_MAX_COLUMNS} columns and cannot be read without moving values; save it as .xlsx or CSV.`);
+      const cells: string[] = [];
+      for (const r of runs) for (let k = 0; k < r.n; k++) cells.push(r.v);
+      rowRuns.push({ cells, n: Math.max(1, Number(attr(row[1], "table:number-rows-repeated") ?? 1) || 1) });
     }
-    sheets.push(gridToSheet(decodeXml(attr(t[1], "table:name") ?? `Sheet${sheets.length + 1}`), grid));
+    while (rowRuns.length && !rowRuns[rowRuns.length - 1].cells.length) rowRuns.pop();
+    const total = rowRuns.reduce((s, r) => s + r.n, 0);
+    if (total > ODS_MAX_ROWS) throw new Error(`Sheet "${name}" has more than ${ODS_MAX_ROWS.toLocaleString("en")} rows; save it as CSV and import that instead.`);
+    const grid: string[][] = [];
+    for (const r of rowRuns) for (let k = 0; k < r.n; k++) grid.push(r.cells);
+    sheets.push(gridToSheet(name, grid));
   }
   return sheets.filter((s) => s.rows > 0);
 }
@@ -347,10 +361,14 @@ export function readDbf(bytes: Uint8Array, name = "Table"): Sheet[] {
       return ar.decode(b);
     }
   };
+  // A file cut short would otherwise import its first records as if they were the whole table.
+  if (headerLen + records * recordLen > bytes.length) {
+    const whole = Math.max(0, Math.floor((bytes.length - headerLen) / Math.max(1, recordLen)));
+    throw new Error(`This .dbf file is incomplete: its header lists ${records} records but only ${whole} are in the file.`);
+  }
   const grid: string[][] = [fields.map((f) => f.name.toLowerCase())];
   for (let r = 0; r < records; r++) {
     const start = headerLen + r * recordLen;
-    if (start + recordLen > bytes.length) break;
     if (bytes[start] === 0x2a) continue;
     let p = start + 1;
     grid.push(
@@ -406,7 +424,9 @@ export function fixedWidthToCsv(text: string): string | null {
 /** Pipe-separated text (some ERPs and most Markdown tables). */
 export function pipeToCsv(text: string): string | null {
   const sample = text.split(/\r?\n/).filter((l) => l.trim()).slice(0, 20);
-  if (sample.length < 2 || sample.filter((l) => (l.match(/\|/g) ?? []).length >= 2).length / sample.length < 0.7) return null;
+  // Pipes inside quoted CSV values ("ACH|Nile|REF") are not delimiters, and the header row must be pipe-separated too.
+  const pipes = (l: string) => (l.replace(/"(?:[^"]|"")*"/g, "").match(/\|/g) ?? []).length;
+  if (sample.length < 2 || pipes(sample[0]) < 2 || sample.filter((l) => pipes(l) >= 2).length / sample.length < 0.7) return null;
   return (
     text
       .split(/\r?\n/)
