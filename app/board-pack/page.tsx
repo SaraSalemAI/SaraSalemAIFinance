@@ -1,6 +1,9 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import Link from "next/link";
+import { Suspense, useMemo, useState } from "react";
+import { computeCompany } from "@/lib/workspace/compute";
+import { IS_STATIC } from "@/lib/env";
 import { useSearchParams } from "next/navigation";
 import { FootballField, Waterfall } from "@/components/charts";
 import { Markdown } from "@/components/Markdown";
@@ -13,7 +16,11 @@ function Pack() {
   const params = useSearchParams();
   const lang = params.get("lang") === "ar" ? "ar" : "en";
   const L = (en: string, ar: string) => (lang === "ar" ? ar : en);
-  const { company, computed, loaded } = useWorkspace();
+  const { company: live, computed: liveComputed, loaded } = useWorkspace();
+  // ?pack=<id> opens a board pack frozen when the period was locked.
+  const snap = live?.boardPacks.find((p) => p.id === params.get("pack")) ?? null;
+  const company = snap ? snap.company : live;
+  const computed = useMemo(() => (snap ? computeCompany(snap.company) : liveComputed), [snap, liveComputed]);
   const { line } = makeT(lang);
   const [summary, setSummary] = useState("");
   const [busy, setBusy] = useState(false);
@@ -68,8 +75,14 @@ function Pack() {
   return (
     <div className="pack" dir={lang === "ar" ? "rtl" : "ltr"} lang={lang}>
       <div className="no-print pack-toolbar">
-        <button onClick={() => window.print()}>{L("Print / Save as PDF", "طباعة / حفظ PDF")}</button>
-        <button className="ghost" disabled={busy} onClick={genSummary}>
+        {IS_STATIC ? (
+          <Link className="button" href="/export">
+            {L("Back to the app", "العودة للتطبيق")}
+          </Link>
+        ) : (
+          <button onClick={() => window.print()}>{L("Print / Save as PDF", "طباعة / حفظ PDF")}</button>
+        )}
+        <button className="ghost" disabled={busy || IS_STATIC} onClick={genSummary}>
           {busy ? L("Writing…", "جارٍ الكتابة…") : L("Add AI executive commentary", "إضافة تعليق تنفيذي بالذكاء الاصطناعي")}
         </button>
         {err && <span className="bad small">{err}</span>}
@@ -81,7 +94,12 @@ function Pack() {
         <p>
           {company.period.currentLabel} · {company.settings.framework} · {ccy}
         </p>
-        <p className="muted">{L("Prepared", "تاريخ الإعداد")}: {new Date().toLocaleDateString(lang === "ar" ? "ar-EG" : "en-GB")} · {L("Period status", "حالة الفترة")}: {company.period.status}</p>
+        <p className="muted">{L("Prepared", "تاريخ الإعداد")}: {(snap ? new Date(snap.createdAt) : new Date()).toLocaleDateString(lang === "ar" ? "ar-EG-u-nu-latn" : "en-GB")} · {L("Period status", "حالة الفترة")}: {company.period.status}</p>
+        {snap && (
+          <p className="muted small">
+            {L("Frozen at period lock by", "مجمدة عند إقفال الفترة بواسطة")} {snap.createdBy} · SHA-256 <span className="mono">{snap.hash.slice(0, 16)}…</span>
+          </p>
+        )}
       </section>
 
       <section className="pack-page">
@@ -102,7 +120,23 @@ function Pack() {
             </div>
           ))}
         </div>
-        {summary ? <Markdown text={summary} /> : <p className="muted">{L("Key movements:", "أهم التغيرات:")} {a.variances.filter((v) => v.material).map((v) => `${line(v.key)} ${v.changePct === null ? "" : `${v.changePct > 0 ? "+" : ""}${v.changePct}%`}`).join(" · ") || "—"}</p>}
+        {summary ? (
+          <Markdown text={summary} />
+        ) : (
+          <p className="muted">
+            {L("Key movements:", "أهم التغيرات:")}{" "}
+            {a.variances.filter((v) => v.material).length
+              ? a.variances
+                  .filter((v) => v.material)
+                  .map((v, i) => (
+                    <span key={v.key}>
+                      {i > 0 && " · "}
+                      {line(v.key)} {v.changePct !== null && <bdi dir="ltr">{`${v.changePct > 0 ? "+" : ""}${v.changePct}%`}</bdi>}
+                    </span>
+                  ))
+              : "—"}
+          </p>
+        )}
         {summary && <p className="muted small">{L("Commentary drafted by AI from the figures in this pack; reviewed by management.", "تعليق أعده الذكاء الاصطناعي من أرقام هذه الحزمة؛ تتم مراجعته من الإدارة.")}</p>}
       </section>
 
@@ -144,7 +178,7 @@ function Pack() {
           </tbody>
         </table>
         <p>
-          ROE = {L("net margin", "هامش الربح")} {((computed.dupont.threeStep.netMargin ?? 0) * 100).toFixed(1)}% × {L("asset turnover", "دوران الأصول")} {(computed.dupont.threeStep.assetTurnover ?? 0).toFixed(2)} × {L("equity multiplier", "مضاعف حقوق الملكية")} {(computed.dupont.threeStep.equityMultiplier ?? 0).toFixed(2)} = {((computed.dupont.threeStep.roe ?? 0) * 100).toFixed(1)}% · Altman Z'' {computed.altman.z ?? "—"} ({computed.altman.zone ?? "—"})
+          ROE = {L("net margin", "هامش الربح")} {((computed.dupont.threeStep.netMargin ?? 0) * 100).toFixed(1)}% × {L("asset turnover", "دوران الأصول")} {(computed.dupont.threeStep.assetTurnover ?? 0).toFixed(2)} × {L("equity multiplier", "مضاعف حقوق الملكية")} {(computed.dupont.threeStep.equityMultiplier ?? 0).toFixed(2)} = {((computed.dupont.threeStep.roe ?? 0) * 100).toFixed(1)}% · {"Altman Z''"} {computed.altman.z ?? "—"} ({computed.altman.zone ?? "—"})
         </p>
       </section>
 

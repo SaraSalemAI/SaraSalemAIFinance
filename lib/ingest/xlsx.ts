@@ -1,0 +1,145 @@
+import { strFromU8, unzipSync } from "fflate";
+
+/**
+ * Minimal .xlsx reader that runs in the browser and on the server. It reads cell values (shared,
+ * inline and plain strings, numbers, booleans) and turns date-formatted serial numbers into
+ * YYYY-MM-DD, which is all the importers need. Formulas are read as their cached values.
+ */
+export interface Sheet {
+  name: string;
+  csv: string;
+  rows: number;
+}
+
+const decode = (s: string) =>
+  s
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&amp;/g, "&");
+
+const attr = (tag: string, name: string) => tag.match(new RegExp(`\\b${name}="([^"]*)"`))?.[1];
+
+/** Text of every <t> inside a fragment (rich text runs are concatenated). */
+const texts = (xml: string) => [...xml.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)].map((m) => decode(m[1])).join("");
+
+function colIndex(ref: string): number {
+  const letters = ref.match(/^[A-Z]+/)?.[0] ?? "A";
+  let n = 0;
+  for (const ch of letters) n = n * 26 + (ch.charCodeAt(0) - 64);
+  return n - 1;
+}
+
+export const BUILTIN_DATE_FORMATS = new Set([14, 15, 16, 17, 22, 27, 30, 36, 45, 46, 47, 50, 57]);
+
+/** A number format is a date when it has day/month/year tokens outside quoted text and no digit placeholders. */
+export const isDateFormatCode = (code: string) => /[dmy]/i.test(code.replace(/"[^"]*"|\[[^\]]*\]/g, "")) && !/0\.0|#/.test(code);
+
+function dateStyles(stylesXml: string | undefined): Set<number> {
+  const out = new Set<number>();
+  if (!stylesXml) return out;
+  const custom = new Map<number, string>();
+  for (const m of stylesXml.matchAll(/<numFmt\b[^>]*>/g)) {
+    const id = Number(attr(m[0], "numFmtId"));
+    custom.set(id, decode(attr(m[0], "formatCode") ?? ""));
+  }
+  const xfs = stylesXml.match(/<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/)?.[1] ?? "";
+  [...xfs.matchAll(/<xf\b[^>]*\/?>/g)].forEach((m, i) => {
+    const id = Number(attr(m[0], "numFmtId") ?? 0);
+    const code = custom.get(id);
+    // A custom format is a date when it has day/month/year tokens outside quoted text.
+    const isDate = BUILTIN_DATE_FORMATS.has(id) || (code !== undefined && isDateFormatCode(code));
+    if (isDate) out.add(i);
+  });
+  return out;
+}
+
+/** Excel serial to ISO date. Workbooks set to the 1904 date system count from 1904-01-01 (serial 0), 1,462 days later. */
+export function serialToIso(serial: number, date1904 = false): string {
+  const ms = Math.round((serial + (date1904 ? 1462 : 0) - 25569) * 86_400_000);
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+export function csvCell(v: string): string {
+  return /[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+}
+
+/**
+ * Grid to CSV. Blank rows are kept as empty lines so that several tables on one sheet can be told
+ * apart later; the CSV parser ignores them otherwise.
+ */
+export function gridToSheet(name: string, grid: Array<string[] | undefined>): Sheet {
+  // A loop rather than Math.max(...rows): spreading one argument per row overflows on large sheets.
+  let width = 0;
+  for (const r of grid) if (r && r.length > width) width = r.length;
+  let last = grid.length - 1;
+  while (last >= 0 && !(grid[last] ?? []).some((x) => (x ?? "").trim() !== "")) last--;
+  const lines = Array.from({ length: last + 1 }, (_, i) => {
+    const r = grid[i] ?? [];
+    return r.some((x) => (x ?? "").trim() !== "") ? Array.from({ length: width }, (_, j) => csvCell(r[j] ?? "")).join(",") : "";
+  });
+  return { name, csv: lines.join("\n") + "\n", rows: lines.filter(Boolean).length };
+}
+
+export function readXlsx(bytes: Uint8Array): Sheet[] {
+  let files: Record<string, Uint8Array>;
+  try {
+    files = unzipSync(bytes, { filter: (f) => f.name.startsWith("xl/") });
+  } catch {
+    throw new Error("This file is not a valid .xlsx workbook. Older .xls files must be saved as .xlsx or CSV first.");
+  }
+  const text = (p: string) => (files[p] ? strFromU8(files[p]) : undefined);
+  const workbook = text("xl/workbook.xml");
+  if (!workbook) throw new Error("This file is not a valid .xlsx workbook.");
+  const rels = text("xl/_rels/workbook.xml.rels") ?? "";
+  const target = new Map<string, string>();
+  for (const m of rels.matchAll(/<Relationship\b[^>]*>/g)) {
+    const id = attr(m[0], "Id");
+    let t = attr(m[0], "Target") ?? "";
+    t = t.startsWith("/") ? t.slice(1) : `xl/${t.replace(/^\.\//, "")}`;
+    if (id) target.set(id, t);
+  }
+  const shared = [...(text("xl/sharedStrings.xml") ?? "").matchAll(/<si\b[^>]*>([\s\S]*?)<\/si>/g)].map((m) => texts(m[1]));
+  const dates = dateStyles(text("xl/styles.xml"));
+  const pr = workbook.match(/<workbookPr\b[^>]*>/)?.[0] ?? "";
+  const date1904 = /\bdate1904="(1|true)"/.test(pr);
+
+  const sheets: Sheet[] = [];
+  for (const m of workbook.matchAll(/<sheet\b[^>]*\/?>/g)) {
+    const name = decode(attr(m[0], "name") ?? `Sheet${sheets.length + 1}`);
+    const rid = attr(m[0], "r:id") ?? m[0].match(/\bid="([^"]*)"/)?.[1];
+    const path = (rid && target.get(rid)) || `xl/worksheets/sheet${sheets.length + 1}.xml`;
+    const xml = text(path);
+    if (!xml) continue;
+    const grid: string[][] = [];
+    for (const row of xml.matchAll(/<row\b([^>]*)>([\s\S]*?)<\/row>/g)) {
+      const r = Number(attr(row[1], "r") ?? grid.length + 1) - 1;
+      const cells: string[] = [];
+      for (const c of row[2].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+        const a = c[1];
+        const body = c[2] ?? "";
+        const ref = attr(a, "r");
+        const idx = ref ? colIndex(ref) : cells.length;
+        const t = attr(a, "t");
+        const v = body.match(/<v>([\s\S]*?)<\/v>/)?.[1];
+        let value = "";
+        if (t === "s") value = shared[Number(v)] ?? "";
+        else if (t === "inlineStr") value = texts(body);
+        else if (t === "b") value = v === "1" ? "TRUE" : "FALSE";
+        else if (t === "str" || t === "e") value = decode(v ?? "");
+        else if (v !== undefined) {
+          const num = Number(v);
+          const style = Number(attr(a, "s") ?? -1);
+          value = dates.has(style) && Number.isFinite(num) && (num > 0 || (date1904 && num === 0)) ? serialToIso(num, date1904) : v;
+        }
+        cells[idx] = value;
+      }
+      grid[r] = Array.from(cells, (x) => x ?? "");
+    }
+    sheets.push(gridToSheet(name, grid));
+  }
+  return sheets.filter((s) => s.rows > 0);
+}

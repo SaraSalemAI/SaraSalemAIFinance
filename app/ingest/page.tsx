@@ -1,11 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AiPanel } from "@/components/AiPanel";
+import { BulkUpload } from "@/components/BulkUpload";
 import { Banner, Card, download, LockNotice, Page, Pill } from "@/components/ui";
 import { csvChunks, GL_SPEC, parseGl, type GlLine } from "@/lib/finance/gl";
 import { sha256Bytes } from "@/lib/finance/hash";
 import { makeT } from "@/lib/i18n";
+import { IS_STATIC } from "@/lib/env";
+import { readXlsx } from "@/lib/ingest/xlsx";
+import { buildTbFromGl } from "@/lib/finance/rollforward";
 import { DOC_LABELS, TIE_LABELS } from "@/lib/labels";
 import { parseCsv, parseTrialBalance, TEMPLATE_HEADER } from "@/lib/finance/parse";
 import * as SL from "@/lib/finance/subledgers";
@@ -44,9 +48,10 @@ interface Staged {
 async function readText(file: File): Promise<{ text: string; bytes: Uint8Array; encoding: string }> {
   const bytes = new Uint8Array(await file.arrayBuffer());
   if (/\.xlsx$/i.test(file.name)) {
-    const res = await fetch("/api/xlsx", { method: "POST", body: bytes });
-    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message ?? "Could not read the workbook");
-    return { text: await res.text(), bytes, encoding: "xlsx" };
+    // Read in the browser (works in the single-file HTML build too); the first sheet with data is used here.
+    const sheet = readXlsx(bytes)[0];
+    if (!sheet) throw new Error("The workbook has no data");
+    return { text: sheet.csv, bytes, encoding: "xlsx" };
   }
   const utf8 = new TextDecoder("utf-8").decode(bytes);
   // Arabic exports from older Windows ERPs are often Windows-1256 rather than UTF-8.
@@ -98,6 +103,79 @@ async function stage(category: DocCategory, file: File, onProgress: (p: number) 
   }
 }
 
+/** Pulls issued e-invoices for the period straight from the ETA portal (server needs ETA API credentials). */
+function EtaPull() {
+  const { company, update, locked } = useWorkspace();
+  const L = useL();
+  const [status, setStatus] = useState<{ configured: boolean; env: string | null } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [key, setKey] = useState(() => {
+    try {
+      return sessionStorage.getItem("eta-access-key") ?? "";
+    } catch {
+      return "";
+    }
+  });
+  const periodRef = useRef(company ? `${company.id}:${company.period.start}:${company.period.end}` : "");
+  useEffect(() => {
+    periodRef.current = company ? `${company.id}:${company.period.start}:${company.period.end}` : "";
+  }, [company]);
+  useEffect(() => {
+    fetch("/api/eta").then((r) => r.json()).then(setStatus).catch(() => setStatus({ configured: false, env: null }));
+  }, []);
+  if (!company || !status) return null;
+  const pull = async () => {
+    setBusy(true);
+    setMsg("");
+    const { start: from, end: to } = company.period;
+    const startedFor = `${company.id}:${from}:${to}`;
+    try {
+      try {
+        sessionStorage.setItem("eta-access-key", key);
+      } catch {
+        /* storage unavailable: the key is still sent for this pull */
+      }
+      const res = await fetch("/api/eta", { method: "POST", headers: { "Content-Type": "application/json", "x-eta-access-key": key }, body: JSON.stringify({ from, to }) });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.message ?? `HTTP ${res.status}`);
+      const id = uid("doc");
+      const text = JSON.stringify(body.documents);
+      if (periodRef.current !== startedFor) {
+        setMsg(L("The company or period changed during the pull; nothing was saved. Pull again.", "تغيرت الشركة أو الفترة أثناء السحب ولم يُحفظ شيء. اسحب مرة أخرى."));
+        return;
+      }
+      // `update` is bound to the company the pull started for; the period check repeats inside the write.
+      update({ action: "eta.pull", entity: "source_documents", recordId: id }, (c) => {
+        if (c.period.start !== from || c.period.end !== to) return c;
+        return {
+          ...c,
+          subledgers: { ...c.subledgers, eta: body.documents },
+          docs: [...c.docs.filter((d) => d.category !== "ETA_INVOICE"), { id, fileName: `ETA portal (${body.env}) ${from}..${to}`, sha256: sha256Bytes(new TextEncoder().encode(text)), category: "ETA_INVOICE", rowCount: body.documents.length, encoding: "api", uploadedAt: new Date().toISOString(), format: "eta-api" }],
+        };
+      });
+      setMsg(L(`${body.documents.length} documents pulled.`, `تم سحب ${body.documents.length} مستند.`));
+    } catch (e) {
+      setMsg((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Card title={L("ETA e-invoicing portal", "منظومة الفاتورة الإلكترونية")}>
+      {status.configured ? (
+        <p className="small">
+          <input type="password" placeholder={L("ETA access key", "مفتاح الوصول")} value={key} onChange={(e) => setKey(e.target.value)} style={{ width: 160 }} />{" "}
+          <button onClick={pull} disabled={busy || locked || !key}>{busy ? "…" : L("Pull issued invoices for the period", "سحب الفواتير الصادرة للفترة")}</button> <span className="muted">({status.env})</span> {msg}
+        </p>
+      ) : (
+        <p className="small muted">{L("Not connected. To pull invoices directly, the server needs ETA_CLIENT_ID, ETA_CLIENT_SECRET and ETA_ENV (your ERP system's ETA API credentials) plus an ETA_ACCESS_KEY that users enter here. Exported ETA JSON/XML files work without it.", "غير متصل. لسحب الفواتير مباشرة يحتاج الخادم إلى ETA_CLIENT_ID وETA_CLIENT_SECRET وETA_ENV ومفتاح ETA_ACCESS_KEY. ملفات التصدير تعمل بدونها.")}</p>
+      )}
+      <p className="muted small">{L("Read-only: it reads documents already submitted. Signing and submitting invoices needs your e-seal (USB token / HSM) and is not done here. VAT is total minus net amount from the portal's search results.", "قراءة فقط: يقرأ المستندات المقدمة. التوقيع والتقديم يحتاج الختم الإلكتروني ولا يتم هنا. الضريبة = الإجمالي ناقص الصافي من نتائج البحث.")}</p>
+    </Card>
+  );
+}
+
 const ORDER: DocCategory[] = ["TRIAL_BALANCE", "GENERAL_LEDGER", "AR_SUBLEDGER", "AP_SUBLEDGER", "FIXED_ASSETS", "INVENTORY", "PAYROLL", "BANK_STATEMENT", "ETA_INVOICE"];
 
 export default function IngestPage() {
@@ -143,6 +221,26 @@ export default function IngestPage() {
     <Page title={L("2 · Ingestion center", "٢ · مركز إدخال البيانات")} subtitle={L("Trial balance, general ledger, subledgers, bank statements and ETA e-invoices. CSV or Excel; UTF-8 or Windows-1256 Arabic.", "ميزان المراجعة ودفتر الأستاذ والدفاتر التحليلية وكشوف البنوك والفواتير الإلكترونية. CSV أو Excel؛ ترميز UTF-8 أو Windows-1256.")}>
       <LockNotice />
       {err && <Banner kind="error">{err}</Banner>}
+      <BulkUpload compact />
+      {!IS_STATIC && <EtaPull />}
+      {company.opening && company.subledgers.gl.length > 0 && (
+        <Banner kind="info">
+          {L("Opening balances were carried from the previous period. You can build this period's trial balance from them plus the general ledger.", "تم ترحيل الأرصدة الافتتاحية من الفترة السابقة. يمكنك بناء ميزان هذه الفترة منها ومن دفتر الأستاذ.")}{" "}
+          <button
+            className="link"
+            disabled={locked}
+            onClick={() =>
+              update({ action: "tb.buildFromGl", entity: "trial_balance_records" }, (c) => {
+                const built = buildTbFromGl(c.opening ?? [], c.subledgers.gl, c.rows);
+                return { ...c, rows: built.rows, period: { ...c.period, mappingConfirmed: false, status: "DRAFT" } };
+              })
+            }
+          >
+            {L("Build trial balance from opening + GL", "بناء الميزان من الأرصدة الافتتاحية والأستاذ")}
+          </button>
+        </Banner>
+      )}
+      <h2 className="section-title">{L("Or load one file at a time", "أو حمّل ملفًا واحدًا في كل مرة")}</h2>
       <div className="ingest-grid">
         {ORDER.map((cat) => {
           const doc = company.docs.find((d) => d.category === cat);
@@ -162,9 +260,11 @@ export default function IngestPage() {
                   {L("Upload", "رفع")}
                   <input type="file" hidden disabled={locked} accept={cat === "ETA_INVOICE" ? ".json,.xml" : ".csv,.txt,.xlsx"} onChange={(e) => onFile(cat, e.target.files?.[0])} />
                 </label>
-                <button className="ghost" onClick={() => download(TEMPLATES[cat].file, "﻿" + TEMPLATES[cat].text, cat === "ETA_INVOICE" ? "application/json" : undefined)}>
-                  {L("Template", "نموذج")}
-                </button>
+                {!IS_STATIC && (
+                  <button className="ghost" onClick={() => download(TEMPLATES[cat].file, "\uFEFF" + TEMPLATES[cat].text, cat === "ETA_INVOICE" ? "application/json" : undefined)}>
+                    {L("Template", "نموذج")}
+                  </button>
+                )}
               </div>
             </Card>
           );

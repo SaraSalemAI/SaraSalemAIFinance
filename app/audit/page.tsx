@@ -6,7 +6,10 @@ import { Banner, Card, NeedsData, Page, Pill } from "@/components/ui";
 import { verifyAudit } from "@/lib/finance/audit";
 import { makeT } from "@/lib/i18n";
 import { CHECK_LABELS, LINE_CATEGORIES } from "@/lib/labels";
-import { canAdvance } from "@/lib/workspace/compute";
+import { canAdvance, computeCompany } from "@/lib/workspace/compute";
+import { rollForwardCompany, snapshotPack } from "@/lib/workspace/period";
+import { nextPeriod } from "@/lib/finance/rollforward";
+import Link from "next/link";
 import { useFormat, useL, useWorkspace } from "@/lib/workspace/store";
 import type { PeriodStatus } from "@/lib/workspace/types";
 
@@ -19,6 +22,7 @@ export default function AuditPage() {
   const { line, category } = makeT(ws.lang);
   const [lineKey, setLineKey] = useState("receivables");
   const [filter, setFilter] = useState("");
+  const [reopenReason, setReopenReason] = useState("");
   const chain = useMemo(() => verifyAudit(ws.audit), [ws.audit]);
   const entries = ws.audit.filter((e) => !company || e.companyId === company.id || e.companyId === "-").filter((e) => (filter ? `${e.action} ${e.entity} ${e.recordId ?? ""} ${e.reason ?? ""}`.toLowerCase().includes(filter.toLowerCase()) : true));
   const isCfo = ws.profile.role === "CFO";
@@ -26,7 +30,18 @@ export default function AuditPage() {
   const setStatus = (to: PeriodStatus, reason?: string) =>
     update(
       { action: `period.${to.toLowerCase()}`, entity: "financial_periods", reason },
-      (c) => ({ ...c, period: { ...c.period, status: to, lockedAt: to === "LOCKED" ? new Date().toISOString() : null, lockedBy: to === "LOCKED" ? ws.profile.name : null, mappingConfirmed: to === "DRAFT" ? false : c.period.mappingConfirmed } }),
+      (c) => {
+        const next = { ...c, period: { ...c.period, status: to, lockedAt: to === "LOCKED" ? new Date().toISOString() : null, lockedBy: to === "LOCKED" ? ws.profile.name : null, mappingConfirmed: to === "DRAFT" ? false : c.period.mappingConfirmed } };
+        // Locking freezes the board pack: the exact state it was produced from, hashed for evidence.
+        return to === "LOCKED" ? { ...next, boardPacks: [...c.boardPacks, snapshotPack(next, ws.profile.name)] } : next;
+      },
+      { allowWhenLocked: true },
+    );
+
+  const roll = () =>
+    update(
+      { action: "period.rollForward", entity: "financial_periods", reason: `${company?.period.currentLabel} closed` },
+      (c) => rollForwardCompany(c, computeCompany(c).rows),
       { allowWhenLocked: true },
     );
 
@@ -60,16 +75,25 @@ export default function AuditPage() {
                   </button>
                 )}
                 {current !== "DRAFT" && (
-                  <button
-                    className="ghost"
-                    disabled={current === "LOCKED" && !isCfo}
-                    onClick={() => {
-                      const reason = prompt(L("Reason for reopening (logged):", "سبب إعادة الفتح (يُسجل):"));
-                      if (reason?.trim()) setStatus("DRAFT", reason);
-                    }}
-                  >
-                    {current === "LOCKED" ? L("Authorised reopening…", "إعادة فتح معتمدة…") : L("Back to draft", "العودة للمسودة")}
-                  </button>
+                  <>
+                    <input
+                      id="reopen-reason"
+                      placeholder={L("Reason for reopening (logged)", "سبب إعادة الفتح (يُسجل)")}
+                      value={reopenReason}
+                      onChange={(e) => setReopenReason(e.target.value)}
+                      disabled={current === "LOCKED" && !isCfo}
+                    />
+                    <button
+                      className="ghost"
+                      disabled={(current === "LOCKED" && !isCfo) || !reopenReason.trim()}
+                      onClick={() => {
+                        setStatus("DRAFT", reopenReason.trim());
+                        setReopenReason("");
+                      }}
+                    >
+                      {current === "LOCKED" ? L("Authorised reopening", "إعادة فتح معتمدة") : L("Back to draft", "العودة للمسودة")}
+                    </button>
+                  </>
                 )}
               </div>
               {next === "LOCKED" && !isCfo && <p className="small muted">{L("Only the CFO role can lock or reopen.", "فقط دور المدير المالي يمكنه الإقفال أو إعادة الفتح.")}</p>}
@@ -78,6 +102,30 @@ export default function AuditPage() {
                   🔒 {L("Locked", "مقفلة")} {new Date(company.period.lockedAt).toLocaleString()} · {company.period.lockedBy}
                 </p>
               )}
+              {current === "LOCKED" && (
+                <div className="actions">
+                  <button disabled={!isCfo} onClick={roll}>
+                    {L("Start next period", "بدء الفترة التالية")}: {nextPeriod(company.period).currentLabel}
+                  </button>
+                  <span className="muted small">{L("Archives this period, carries closing balances forward as opening balances (P&L closed to retained earnings at year end) and keeps them as comparatives.", "يؤرشف الفترة ويرحّل الأرصدة الختامية كأرصدة افتتاحية (مع إقفال قائمة الدخل في الأرباح المرحلة في نهاية السنة) ويحتفظ بها للمقارنة.")}</span>
+                </div>
+              )}
+            </Card>
+
+            <Card title={L("Board packs and closed periods", "حزم المجلس والفترات المقفلة")}>
+              {!company.boardPacks.length && !company.history.length && <p className="muted small">{L("A board pack is saved automatically each time a period is locked.", "تُحفظ حزمة المجلس تلقائيًا عند كل إقفال للفترة.")}</p>}
+              <ul className="small">
+                {company.boardPacks.map((p) => (
+                  <li key={p.id}>
+                    <Link href={`/board-pack?pack=${p.id}`}>{p.periodLabel}</Link> · {new Date(p.createdAt).toLocaleString()} · {p.createdBy} · <span className="mono muted">{p.hash.slice(0, 12)}</span>
+                  </li>
+                ))}
+                {company.history.map((h) => (
+                  <li key={h.id}>
+                    {L("Closed period", "فترة مقفلة")} {h.label} ({h.start} → {h.end}) · {h.rows.length} {L("accounts", "حساب")} · {L("archived", "أُرشفت")} {new Date(h.archivedAt).toLocaleDateString()}
+                  </li>
+                ))}
+              </ul>
             </Card>
 
             <Card title={L("Lineage explorer", "مستكشف التتبع")}>

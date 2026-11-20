@@ -5,6 +5,9 @@ import { DEFAULT_TAX_INPUTS } from "../finance/tax";
 import { DEFAULT_VALUATION } from "../finance/valuation";
 import type { Company, Workspace } from "./types";
 
+export const DEFAULT_AUTOMATION = { autoImport: true, autoMapThreshold: 85, aiMapping: true, autoAdvance: true, minConfidence: 60 };
+export const DEFAULT_CASH_FORECAST = { weeks: 13, overdueCollectionRate: 0.8, overdueWeeks: 4, collectionLagDays: 0, overduePayableWeeks: 2, includePayroll: true, minimumCash: null, openingCash: null };
+
 export function uid(prefix = "id"): string {
   const rnd = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36);
   return `${prefix}_${rnd.replace(/-/g, "").slice(0, 16)}`;
@@ -55,6 +58,20 @@ export function newCompany(name = "New company"): Company {
     disclosures: {},
     valuation: structuredClone(DEFAULT_VALUATION),
     stress: { ...DEFAULT_STRESS },
+    columnMaps: {},
+    fxRates: {},
+    monthly: [],
+    monthlyYtd: true,
+    intercompanyCodes: [],
+    opening: null,
+    history: [],
+    boardPacks: [],
+    tolerance: 1,
+    automation: { ...DEFAULT_AUTOMATION },
+    fileMemory: {},
+    importRuns: [],
+    validationRuns: [],
+    cashForecast: { ...DEFAULT_CASH_FORECAST, items: [] },
   };
 }
 
@@ -68,6 +85,8 @@ export function newWorkspace(): Workspace {
     activeCompanyId: null,
     benchmarks: {},
     audit: [],
+    groups: [],
+    sync: null,
   };
 }
 
@@ -86,5 +105,7 @@ export function migrateCompany(c: Partial<Company>): Company {
     scenarios: { ...base.scenarios, ...c.scenarios },
     sensitivity: { ...base.sensitivity, ...c.sensitivity },
     covenants: { ...base.covenants, ...c.covenants },
+    automation: { ...base.automation, ...c.automation },
+    cashForecast: { ...base.cashForecast, ...c.cashForecast },
   } as Company;
 }
