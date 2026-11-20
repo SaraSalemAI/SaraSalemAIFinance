@@ -61,7 +61,13 @@ export function monthlyTrend(months: Array<{ label: string; rows: TBRow[] }>, yt
 export function trendSummary(points: TrendPoint[]) {
   if (!points.length) return null;
   const last = points[points.length - 1];
-  const prev = points.length > 1 ? points[points.length - 2] : null;
+  const before = points.length > 1 ? points[points.length - 2] : null;
+  // Month-on-month needs the calendar month just before: with January and March only, there is no comparison.
+  const idx = (label: string) => {
+    const [y, mo] = label.split("-").map(Number);
+    return y * 12 + mo;
+  };
+  const prev = before && idx(last.label) - idx(before.label) === 1 ? before : null;
   const last3 = points.slice(-3);
   return Object.fromEntries(
     TREND_KEYS.map((k) => {

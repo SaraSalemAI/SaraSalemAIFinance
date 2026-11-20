@@ -68,7 +68,8 @@ interface Props {
   /** Files handed in from outside (the agent's attach button); read once each time the array changes. */
   incoming?: File[] | null;
   onIncomingDone?: () => void;
-  onPipeline?: (run: ImportRun) => void;
+  /** Called when an automatic run finishes, with the handed-in files whose every part was imported. */
+  onPipeline?: (run: ImportRun, completed: File[]) => void;
 }
 
 export function BulkUpload(props: Props) {
@@ -148,6 +149,16 @@ function BulkUploadInner({ compact = false, incoming = null, onIncomingDone, onP
   useEffect(() => {
     latest.current = company;
   }, [company]);
+  // False once this upload session is gone (another company was selected), so a late finish reports to no one.
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+  // Which units each dropped file produced, to tell the caller which files were fully imported.
+  const sources = useRef<Array<{ file: File; unitIds: string[] }>>([]);
 
   const included = useMemo(() => rows.filter((r) => r.include && r.staged && r.category), [rows]);
   const items: BatchItem[] = useMemo(() => included.map((r) => ({ id: r.unit.id, staged: r.staged!, role: r.role, month: r.month })), [included]);
@@ -230,7 +241,9 @@ function BulkUploadInner({ compact = false, incoming = null, onIncomingDone, onP
     setLastRun(run);
     setDone(run.files.map((x) => x.name));
     setPhase("done");
-    onPipeline?.(run);
+    const importedIds = new Set(eligible.map((x) => x.row.unit.id));
+    const completed = sources.current.filter((s) => s.unitIds.length > 0 && s.unitIds.every((id) => importedIds.has(id))).map((s) => s.file);
+    if (alive.current) onPipeline?.(run, completed);
   };
 
   const addFiles = async (list: FileList | File[] | null) => {
@@ -241,6 +254,8 @@ function BulkUploadInner({ compact = false, incoming = null, onIncomingDone, onP
     setPhase("reading");
     const files = await Promise.all([...list].map(async (file) => ({ name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) })));
     const { units, errors: errs } = await expandFiles(files);
+    // A unit is traced to its file by name; files sharing a name share their units, so neither counts as done unless all are.
+    sources.current = [...list].map((file) => ({ file, unitIds: units.filter((u) => u.fileName === file.name).map((u) => u.id) }));
     setErrors(errs);
     setPhase("detecting");
     const fresh: Row[] = defaultRoles(

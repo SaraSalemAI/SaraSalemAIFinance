@@ -227,6 +227,8 @@ export function readXls(bytes: Uint8Array): Sheet[] {
 
 const ODS_MAX_COLUMNS = 2000;
 const ODS_MAX_ROWS = 200_000;
+/** Cells across a whole workbook after repeats are expanded: keeps a small file from filling the browser's memory. */
+const ODS_MAX_CELLS = 5_000_000;
 
 export function readOds(bytes: Uint8Array): Sheet[] {
   let xml: string;
@@ -236,6 +238,7 @@ export function readOds(bytes: Uint8Array): Sheet[] {
     throw new Error("This .ods file could not be opened.");
   }
   const sheets: Sheet[] = [];
+  let cellsSoFar = 0;
   for (const t of xml.matchAll(/<table:table\b([^>]*)>([\s\S]*?)<\/table:table>/g)) {
     const name = decodeXml(attr(t[1], "table:name") ?? `Sheet${sheets.length + 1}`);
     // Repeats are kept as runs, and only trailing empty runs (padding to the sheet edge) are dropped,
@@ -260,6 +263,8 @@ export function readOds(bytes: Uint8Array): Sheet[] {
     while (rowRuns.length && !rowRuns[rowRuns.length - 1].cells.length) rowRuns.pop();
     const total = rowRuns.reduce((s, r) => s + r.n, 0);
     if (total > ODS_MAX_ROWS) throw new Error(`Sheet "${name}" has more than ${ODS_MAX_ROWS.toLocaleString("en")} rows; save it as CSV and import that instead.`);
+    cellsSoFar += rowRuns.reduce((s, r) => s + r.n * r.cells.length, 0);
+    if (cellsSoFar > ODS_MAX_CELLS) throw new Error(`This .ods file expands to more than ${ODS_MAX_CELLS.toLocaleString("en")} cells; save it as CSV and import that instead.`);
     const grid: string[][] = [];
     for (const r of rowRuns) for (let k = 0; k < r.n; k++) grid.push(r.cells);
     sheets.push(gridToSheet(name, grid));

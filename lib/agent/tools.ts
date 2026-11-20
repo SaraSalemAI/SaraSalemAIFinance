@@ -343,7 +343,7 @@ export function buildAgentTools(company: Company, peers: Company[] = [], groups:
           return round({
             currency: fn,
             customers: [...m.values()].sort((a, b) => b.open - a.open).slice(0, limit),
-            ...(missingRates.size ? { leftOutNoRate: [...missingRates], note: "Invoices in these currencies have no exchange rate and are not ranked. Enter the rate on the trial balance page." } : {}),
+            ...(missingRates.size ? { leftOutNoRate: [...missingRates], note: "Invoices in these currencies have no exchange rate and are not ranked. Enter the rate in the upload panel's exchange-rate inputs (home or ingest page)." } : {}),
           });
         }
         if (!company.subledgers.ap.length) return { error: "AP ledger not loaded." };

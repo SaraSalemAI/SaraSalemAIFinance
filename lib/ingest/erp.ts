@@ -449,7 +449,11 @@ export function normaliseTable(text: string, category: CsvCategory, columnMap: R
 
   // Signed closing balance instead of closing debit/credit (Odoo "End balance", QuickBooks/Dynamics "Balance").
   const bal = idx("__balance");
-  const explicitClosing = SYNONYMS.TRIAL_BALANCE.current_debit.map(headerKey).some((k) => merged.includes(k)) || mapped.has("current_debit") || mapped.has("current_credit");
+  // Closing columns count only where they still resolve to the current closing fields: a "Closing Debit" the analyst
+  // mapped to the prior year does not stop the balance from being used.
+  const closingKeys = new Set([...SYNONYMS.TRIAL_BALANCE.current_debit, ...(SYNONYMS.TRIAL_BALANCE.current_credit ?? [])].map(headerKey));
+  const isCurrent = (h: string) => h === "current_debit" || h === "current_credit";
+  const explicitClosing = merged.some((k, j) => closingKeys.has(k) && isCurrent(headers[j])) || mapped.has("current_debit") || mapped.has("current_credit");
   if (category === "TRIAL_BALANCE" && bal >= 0 && !explicitClosing) {
     const dr = colFor("current_debit");
     const cr = colFor("current_credit");

@@ -5,6 +5,14 @@ import { uid } from "./defaults";
 import type { TBRow } from "../finance/types";
 import type { BoardPackSnapshot, Company } from "./types";
 
+/** First day of the twelve months ending on `end` (YYYY-MM-DD). */
+export function fiscalYearStart(end: string): string {
+  const [y, m, d] = end.split("-").map(Number);
+  const next = new Date(Date.UTC(y, m - 1, d + 1));
+  next.setUTCFullYear(next.getUTCFullYear() - 1);
+  return next.toISOString().slice(0, 10);
+}
+
 /** The company state a board pack is produced from, without raw ledgers or earlier packs, hashed for evidence. */
 export function snapshotPack(c: Company, by: string): BoardPackSnapshot {
   const company: Company = { ...c, subledgers: { ...c.subledgers, gl: [], bank: [] }, boardPacks: [], history: [], monthly: [] };
@@ -26,10 +34,12 @@ export function rollForwardCompany(c: Company, adjustedRows: Company["rows"]): C
   const seeded = rows.map((r) => ({ ...r, currentDebit: byCode.get(r.code)?.currentDebit ?? 0, currentCredit: byCode.get(r.code)?.currentCredit ?? 0 }));
   for (const o of opening) if (!rows.some((r) => r.code === o.code)) seeded.push(o);
   // At a new fiscal year the asset register opens at last year's closing accumulated (and tax)
-  // depreciation, without last year's charge; disposed assets leave the register.
+  // depreciation, without last year's charge; disposed assets leave the register. Within a year the
+  // register holds the year's opening figures, so the charge carried is the whole fiscal year's, not
+  // only the closing quarter's (tax depreciation is already an annual figure).
   const far: FixedAsset[] = closeYear
     ? c.subledgers.far.flatMap((a) => {
-        const s = assetSchedule(a, c.period.start, c.period.end);
+        const s = assetSchedule(a, fiscalYearStart(c.period.end), c.period.end);
         if (s.disposed) return [];
         const taxCost = a.taxCostBase || a.cost;
         return [{ ...a, accumulatedDepreciation: s.accumulatedDepreciation, currentYearDepreciation: 0, accumulatedTaxDepreciation: Math.round((taxCost - s.taxBase) * 100) / 100 }];

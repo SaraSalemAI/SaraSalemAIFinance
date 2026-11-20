@@ -133,7 +133,15 @@ export function runPipeline(c: Company, items: Array<BatchItem & { unit: Unit }>
 
 /** Which trial balance a company's rows came from, so a late AI answer is applied only to the file it was asked about. */
 export function tbIdentity(c: Company): string {
-  return [...new Set(c.rows.map((r) => r.sourceDocId ?? ""))].sort().join(",");
+  const docs = [...new Set(c.rows.map((r) => r.sourceDocId ?? ""))].sort().join(",");
+  // What the AI is asked about: codes, names and balances. Rows rebuilt from a new ledger keep no source id, so these are fingerprinted too.
+  const inputs = c.rows
+    .map((r) => `${r.code}\u0001${r.name}\u0001${Math.round((r.currentDebit - r.currentCredit) * 100)}`)
+    .sort()
+    .join("\u0002");
+  let h = 5381;
+  for (let i = 0; i < inputs.length; i++) h = ((h << 5) + h + inputs.charCodeAt(i)) | 0;
+  return `${docs}#${c.rows.length}:${(h >>> 0).toString(36)}`;
 }
 
 /** Applies the AI's account suggestions: confident ones are accepted, the rest wait for review. Never overrides a confirmed mapping. */

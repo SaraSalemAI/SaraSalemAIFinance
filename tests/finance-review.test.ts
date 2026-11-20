@@ -11,7 +11,12 @@ import type { Company } from "@/lib/workspace/types";
 
 const tb = (csv: string) => parseTrialBalance("code,name,category,current_debit,current_credit,prior_debit,prior_credit\n" + csv).rows;
 const base = { startDate: "2026-01-01", openingCash: 1000, weeks: 13, overdueCollectionRate: 1, overdueWeeks: 2, collectionLagDays: 0, overduePayableWeeks: 1, includePayroll: false, minimumCash: null, items: [], ar: [], ap: [], payroll: [], payrollPeriodsPerYear: 12 };
-const company = (patch: Partial<Company> = {}): Company => ({ ...newCompany("Co"), rows: tb("1010,Cash,CASH,1000,0,1000,0\n3000,Capital,SHARE_CAPITAL,0,1000,0,1000"), ...patch });
+// FY2025 fixed here: newCompany() takes its period from today's date, which would move the fixtures with the calendar.
+const FY2025 = { start: "2025-01-01", end: "2025-12-31", currentLabel: "FY2025", priorLabel: "FY2024" };
+const company = (patch: Partial<Company> = {}): Company => {
+  const c = newCompany("Co");
+  return { ...c, period: { ...c.period, ...FY2025 }, rows: tb("1010,Cash,CASH,1000,0,1000,0\n3000,Capital,SHARE_CAPITAL,0,1000,0,1000"), ...patch };
+};
 
 describe("cash forecast review fixes", () => {
   it("pays January payroll in the week that crosses into February", () => {

@@ -72,7 +72,7 @@ export default function AgentPage() {
   // The company a streamed reply belongs to; replies for a company no longer selected are dropped.
   const activeCompany = useRef(companyId);
   // Inbox files handed to the upload but not yet confirmed imported: marked only once the import succeeds.
-  const pendingInbox = useRef<Array<{ id: string; name: string }>>([]);
+  const pendingInbox = useRef<Array<{ id: string; file: File }>>([]);
 
   useEffect(() => {
     aiStatus().then(setStatus);
@@ -236,9 +236,15 @@ export default function AgentPage() {
   const checkInbox = async () => {
     const sync = ws.sync;
     if (!sync?.accessToken) return;
+    const startedFor = companyId;
     setInbox({ busy: true, note: "" });
     try {
       const items = await listInbox(sync);
+      // The files belong to the company the check was started for; drop them if another one is selected now.
+      if (activeCompany.current !== startedFor) {
+        setInbox({ busy: false, note: "" });
+        return;
+      }
       if (!items.length) {
         setInbox({ busy: false, note: L("No new files in the email inbox.", "لا توجد ملفات جديدة في صندوق البريد.") });
         return;
@@ -250,7 +256,7 @@ export default function AgentPage() {
         return new File([bytes], it.file_name, { type: it.content_type ?? "application/octet-stream" });
       });
       // Marked imported only after the upload imports them (see onPipeline); held or unreadable files stay in the inbox.
-      pendingInbox.current = items.map((it) => ({ id: it.id, name: it.file_name }));
+      pendingInbox.current = items.map((it, i) => ({ id: it.id, file: files[i] }));
       setAttached(files);
       setInbox({ busy: false, note: L(`${files.length} file(s) from email: ${[...new Set(items.map((i) => i.sender).filter(Boolean))].join(", ")}`, `${files.length} ملف من البريد: ${[...new Set(items.map((i) => i.sender).filter(Boolean))].join("، ")}`) });
     } catch (e) {
@@ -262,9 +268,9 @@ export default function AgentPage() {
     "Review the files I just uploaded: what was imported, what was held back, which validation rules fail and what should I fix first?",
     "راجع الملفات التي رفعتها: ما الذي تم استيراده، وما الذي تم تعليقه، وأي قواعد تحقق فشلت، وبماذا أبدأ؟",
   );
-  const onPipeline = (run: ImportRun) => {
-    const imported = new Set(run.files.map((x) => x.name.split(" › ")[0]));
-    const done = pendingInbox.current.filter((p) => imported.has(p.name));
+  const onPipeline = (run: ImportRun, completed: File[]) => {
+    // Matched by the File object handed to the upload, not by name: two emails can carry files with the same name.
+    const done = pendingInbox.current.filter((p) => completed.includes(p.file));
     if (done.length && ws.sync?.accessToken) {
       pendingInbox.current = pendingInbox.current.filter((p) => !done.includes(p));
       markImported(ws.sync, done.map((p) => p.id)).catch((e) => setInbox((s) => ({ ...s, note: (e as Error).message })));

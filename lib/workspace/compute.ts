@@ -164,14 +164,16 @@ export interface PeriodCheck {
 export function periodChecks(c: Company, a: Analysis, cfDiff: number | null, ties: Record<string, { ties: boolean; difference?: number } | null>): PeriodCheck[] {
   const tol = Math.max(0.01, c.tolerance ?? 0.01);
   // The analyst's rounding tolerance applies to the trial balance too, for both periods.
-  const balanced = Math.abs(a.current.totalDebits - a.current.totalCredits) <= tol && (!a.prior || Math.abs(a.prior.totalDebits - a.prior.totalCredits) <= tol);
-  const tied = (t: { ties: boolean; difference?: number } | null) => t === null || t.ties || (t.difference !== undefined && Math.abs(t.difference) <= tol);
+  // Differences are money: compared in whole cents, so 0.07 − 0.06 counts as the one cent it is.
+  const within = (d: number) => Math.round(Math.abs(d) * 100) <= Math.round(tol * 100);
+  const balanced = within(a.current.totalDebits - a.current.totalCredits) && (!a.prior || within(a.prior.totalDebits - a.prior.totalCredits));
+  const tied = (t: { ties: boolean; difference?: number } | null) => t === null || t.ties || (t.difference !== undefined && within(t.difference));
   return [
     { key: "tbBalanced", ok: balanced, requiredFor: "MAPPED" },
     { key: "allMapped", ok: c.rows.every((r) => r.category !== ""), requiredFor: "MAPPED" },
     { key: "mappingConfirmed", ok: c.period.mappingConfirmed && !c.rows.some((r) => r.suggested), requiredFor: "MAPPED" },
-    { key: "bsTies", ok: Math.abs(a.current.balanceCheck) <= tol, requiredFor: "RECONCILED" },
-    { key: "cashFlowTies", ok: cfDiff === null || Math.abs(cfDiff) <= tol, requiredFor: "RECONCILED" },
+    { key: "bsTies", ok: within(a.current.balanceCheck), requiredFor: "RECONCILED" },
+    { key: "cashFlowTies", ok: cfDiff === null || within(cfDiff), requiredFor: "RECONCILED" },
     { key: "subledgersTie", ok: Object.values(ties).every(tied), requiredFor: "RECONCILED" },
   ];
 }
