@@ -63,9 +63,12 @@ export function cashForecast(x: ForecastInputs) {
   }));
   const weekOf = (date: string) => rows.findIndex((w) => date >= w.start && date <= w.end);
   const horizonEnd = rows[rows.length - 1].end;
+  // Spread evenly over n weeks; weeks past the horizon keep their share outside the forecast.
   const spread = (total: number, n: number, set: (w: ForecastWeek, v: number) => void) => {
-    const k = Math.max(1, Math.min(n, weeks));
-    for (let i = 0; i < k; i++) set(rows[i], total / k);
+    const span = Math.max(1, Math.round(n));
+    const k = Math.min(span, weeks);
+    for (let i = 0; i < k; i++) set(rows[i], total / span);
+    return (total / span) * (span - k);
   };
 
   // Receivables.
@@ -78,7 +81,7 @@ export function cashForecast(x: ForecastInputs) {
     else if (expected > horizonEnd) beyondAr += inv.outstanding;
     else rows[weekOf(expected)].collections += inv.outstanding;
   }
-  spread(overdueAr * x.overdueCollectionRate, x.overdueWeeks, (w, v) => (w.overdueCollections += v));
+  beyondAr += spread(overdueAr * x.overdueCollectionRate, x.overdueWeeks, (w, v) => (w.overdueCollections += v));
 
   // Payables.
   let overdueAp = 0;
@@ -89,7 +92,7 @@ export function cashForecast(x: ForecastInputs) {
     else if (inv.dueDate > horizonEnd) beyondAp += inv.netPayable;
     else rows[weekOf(inv.dueDate)].supplierPayments -= inv.netPayable;
   }
-  spread(overdueAp, x.overduePayableWeeks, (w, v) => (w.supplierPayments -= v));
+  beyondAp += spread(overdueAp, x.overduePayableWeeks, (w, v) => (w.supplierPayments -= v));
 
   // Payroll: the register is one pay period; net pay goes out at each month end, social insurance and
   // salary tax by the 15th of the following month.
@@ -98,8 +101,9 @@ export function cashForecast(x: ForecastInputs) {
     const net = x.payroll.reduce((a, l) => a + l.net, 0) * toMonth;
     const taxes = x.payroll.reduce((a, l) => a + l.employeeSocialInsurance + l.companySocialInsurance + l.incomeTax, 0) * toMonth;
     for (const w of rows) {
-      const monthEnd = new Date(Date.UTC(Number(w.end.slice(0, 4)), Number(w.end.slice(5, 7)), 0)).toISOString().slice(0, 10);
-      if (monthEnd >= w.start && monthEnd <= w.end) w.payroll -= net;
+      // Month ends of both the start and the end month, so a week crossing into the next month keeps this month's payroll.
+      const monthEndOf = (iso: string) => new Date(Date.UTC(Number(iso.slice(0, 4)), Number(iso.slice(5, 7)), 0)).toISOString().slice(0, 10);
+      for (const monthEnd of new Set([monthEndOf(w.start), monthEndOf(w.end)])) if (monthEnd >= w.start && monthEnd <= w.end) w.payroll -= net;
       const fifteenth = `${w.start.slice(0, 7)}-15`;
       const fifteenth2 = `${w.end.slice(0, 7)}-15`;
       if ((fifteenth >= w.start && fifteenth <= w.end) || (fifteenth2 !== fifteenth && fifteenth2 >= w.start && fifteenth2 <= w.end)) w.payrollTaxes -= taxes;

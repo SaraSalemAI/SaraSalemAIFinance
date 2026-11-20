@@ -20,7 +20,7 @@ describe("new agent tools", () => {
     const all = await run(tools, "search_gl", { limit: 5 });
     expect(all.matches).toBe(c.subledgers.gl.length);
     expect((all.lines as unknown[]).length).toBe(5);
-    const cust = (await run(tools, "get_top_counterparties", { side: "customers", limit: 3 })) as unknown as Array<{ customer: string; open: number }>;
+    const cust = ((await run(tools, "get_top_counterparties", { side: "customers", limit: 3 })) as unknown as { customers: Array<{ customer: string; open: number }> }).customers;
     expect(cust[0]).toMatchObject({ customer: "Delta Retail SAE", open: 2_100_000 });
     const review = await run(tools, "get_close_review", { severity: "all" });
     expect(Array.isArray(review.anomalies)).toBe(true);

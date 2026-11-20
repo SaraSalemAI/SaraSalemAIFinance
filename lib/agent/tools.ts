@@ -322,15 +322,29 @@ export function buildAgentTools(company: Company, peers: Company[] = [], groups:
         const asOf = company.period.end;
         if (side === "customers") {
           if (!company.subledgers.ar.length) return { error: "AR aging not loaded." };
-          const m = new Map<string, { customer: string; open: number; overdue: number; invoices: number }>();
+          // Translated at the analyst's rates, as in the receivables report, so customers rank in one currency.
+          const fn = company.settings.functionalCurrency;
+          const missingRates = new Set<string>();
+          const m = new Map<string, { customer: string; open: number; overdue: number; invoices: number; currencies: string[] }>();
           for (const i of company.subledgers.ar) {
-            const e = m.get(i.customer) ?? { customer: i.customer, open: 0, overdue: 0, invoices: 0 };
-            e.open += i.outstanding;
-            if (i.dueDate < asOf) e.overdue += i.outstanding;
+            const ccy = (i.currency || fn).toUpperCase();
+            const rate = ccy === fn ? 1 : company.fxRates[ccy];
+            if (!rate) {
+              missingRates.add(ccy);
+              continue;
+            }
+            const e = m.get(i.customer) ?? { customer: i.customer, open: 0, overdue: 0, invoices: 0, currencies: [] };
+            e.open += i.outstanding * rate;
+            if (i.dueDate < asOf) e.overdue += i.outstanding * rate;
             e.invoices++;
+            if (!e.currencies.includes(ccy)) e.currencies.push(ccy);
             m.set(i.customer, e);
           }
-          return round([...m.values()].sort((a, b) => b.open - a.open).slice(0, limit));
+          return round({
+            currency: fn,
+            customers: [...m.values()].sort((a, b) => b.open - a.open).slice(0, limit),
+            ...(missingRates.size ? { leftOutNoRate: [...missingRates], note: "Invoices in these currencies have no exchange rate and are not ranked. Enter the rate on the trial balance page." } : {}),
+          });
         }
         if (!company.subledgers.ap.length) return { error: "AP ledger not loaded." };
         const m = new Map<string, { supplier: string; open: number; whtDeducted: number; invoices: number }>();
@@ -363,6 +377,10 @@ export function buildAgentTools(company: Company, peers: Company[] = [], groups:
           group: g.name,
           members: r.entities.map((e) => ({ name: e.name, ownership: e.ownership, parent: e.isParent })),
           missingMembers: r.missing.length,
+          excludedMembers: [
+            ...r.currencyMismatch.map((x) => ({ company: [company, ...peers].find((c) => c.id === x.companyId)?.settings.tradeNameEn ?? x.companyId, reason: `reports in ${x.currency}, parent reports in ${x.expected}` })),
+            ...r.periodMismatch.map((x) => ({ company: [company, ...peers].find((c) => c.id === x.companyId)?.settings.tradeNameEn ?? x.companyId, reason: `period ${x.start} to ${x.end}, parent ${x.expected.start} to ${x.expected.end}` })),
+          ],
           eliminations: r.eliminations,
           unreconciled: r.differences,
           goodwill: r.goodwill,

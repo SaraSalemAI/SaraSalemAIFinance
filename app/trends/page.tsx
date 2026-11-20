@@ -74,7 +74,10 @@ export default function TrendsPage() {
                   <tr>
                     <th />
                     {pts.map((p) => (
-                      <th key={p.label} className="num">{p.label}</th>
+                      <th key={p.label} className="num" title={p.gap ? L("P&L covers more than one month", "قائمة الدخل تغطي أكثر من شهر") : undefined}>
+                        {p.label}
+                        {p.gap ? " *" : ""}
+                      </th>
                     ))}
                     <th className="num">{L("3-month avg", "متوسط ٣ أشهر")}</th>
                   </tr>
@@ -106,6 +109,11 @@ export default function TrendsPage() {
                 </tbody>
               </table>
             </div>
+            {pts.some((p) => p.gap) && (
+              <p className="small muted">
+                * {L("Profit and loss for this column covers more than one month: an earlier month of the same year is missing, or the first file is not the first month of the year. It is left out of the month-on-month change and the 3-month average.", "قائمة الدخل في هذا العمود تغطي أكثر من شهر: يوجد شهر سابق مفقود من نفس السنة أو أن أول ملف ليس أول شهر في السنة. لا تدخل في التغير الشهري ولا في متوسط ٣ أشهر.")}
+              </p>
+            )}
             <div className="actions">
               {company.monthly.map((m) => (
                 <button

@@ -125,6 +125,15 @@ export default function ConsolidationPage() {
             </button>
           </Card>
 
+          {result && (result.currencyMismatch.length > 0 || result.periodMismatch.length > 0) && (
+            <Banner kind="warning">
+              {L("Left out of the group totals until they match the parent:", "مستبعدة من إجماليات المجموعة حتى تطابق الشركة الأم:")}{" "}
+              {[
+                ...result.currencyMismatch.map((x) => `${ws.companies.find((c) => c.id === x.companyId)?.settings.tradeNameEn ?? x.companyId} — ${L("reports in", "عملة التقرير")} ${x.currency}, ${L("parent", "الأم")} ${x.expected}`),
+                ...result.periodMismatch.map((x) => `${ws.companies.find((c) => c.id === x.companyId)?.settings.tradeNameEn ?? x.companyId} — ${L("period", "الفترة")} ${x.start} → ${x.end}, ${L("parent", "الأم")} ${x.expected.start} → ${x.expected.end}`),
+              ].join(" · ")}
+            </Banner>
+          )}
           {result && a && (
             <>
               <div className="stats">

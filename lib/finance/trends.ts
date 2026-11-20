@@ -12,6 +12,11 @@ export interface TrendPoint {
   netMargin: number | null;
   /** Receivable days on the month's revenue, annualised. */
   dso: number | null;
+  /**
+   * True when the P&L figures cover more than this month: year-to-date files with a missing earlier
+   * month (the difference spans several months) or a first file that is not the fiscal year's first month.
+   */
+  gap: boolean;
 }
 
 /**
@@ -26,8 +31,14 @@ export function monthlyTrend(months: Array<{ label: string; rows: TBRow[] }>, yt
     const [y, mo] = label.split("-").map(Number);
     return mo >= fiscalYearStartMonth ? y : y - 1;
   };
+  const monthIndex = (label: string) => {
+    const [y, mo] = label.split("-").map(Number);
+    return y * 12 + mo;
+  };
   return figs.map((m, i) => {
     const prev = i > 0 && fyOf(figs[i - 1].label) === fyOf(m.label) ? figs[i - 1].f : null;
+    const firstOfYear = Number(m.label.split("-")[1]) === fiscalYearStartMonth;
+    const gap = ytd && !firstOfYear && !(prev && monthIndex(m.label) - monthIndex(figs[i - 1].label) === 1);
     const values = Object.fromEntries(
       TREND_KEYS.map((k) => {
         const v = m.f[k as keyof PeriodFigures] as number;
@@ -40,7 +51,8 @@ export function monthlyTrend(months: Array<{ label: string; rows: TBRow[] }>, yt
       values,
       grossMargin: rev ? round2((values.grossProfit / rev) * 100) : null,
       netMargin: rev ? round2((values.netProfit / rev) * 100) : null,
-      dso: rev > 0 ? round2((values.receivables / (rev * 12)) * 365) : null,
+      dso: rev > 0 && !gap ? round2((values.receivables / (rev * 12)) * 365) : null,
+      gap,
     };
   });
 }
@@ -52,14 +64,20 @@ export function trendSummary(points: TrendPoint[]) {
   const prev = points.length > 1 ? points[points.length - 2] : null;
   const last3 = points.slice(-3);
   return Object.fromEntries(
-    TREND_KEYS.map((k) => [
-      k,
-      {
-        latest: last.values[k],
-        momChange: prev ? round2(last.values[k] - prev.values[k]) : null,
-        momPct: prev && prev.values[k] ? round2(((last.values[k] - prev.values[k]) / Math.abs(prev.values[k])) * 100) : null,
-        avg3: round2(last3.reduce((a, p) => a + p.values[k], 0) / last3.length),
-      },
-    ]),
-  ) as Record<TrendKey, { latest: number; momChange: number | null; momPct: number | null; avg3: number }>;
+    TREND_KEYS.map((k) => {
+      // P&L of a multi-month span is not a monthly figure: leave it out of month-on-month and the average.
+      const pl = PL_KEYS.has(k);
+      const cmp = prev && !(pl && (prev.gap || last.gap)) ? prev : null;
+      const avgPts = pl ? last3.filter((p) => !p.gap) : last3;
+      return [
+        k,
+        {
+          latest: last.values[k],
+          momChange: cmp ? round2(last.values[k] - cmp.values[k]) : null,
+          momPct: cmp && cmp.values[k] ? round2(((last.values[k] - cmp.values[k]) / Math.abs(cmp.values[k])) * 100) : null,
+          avg3: avgPts.length ? round2(avgPts.reduce((a, p) => a + p.values[k], 0) / avgPts.length) : null,
+        },
+      ];
+    }),
+  ) as Record<TrendKey, { latest: number; momChange: number | null; momPct: number | null; avg3: number | null }>;
 }

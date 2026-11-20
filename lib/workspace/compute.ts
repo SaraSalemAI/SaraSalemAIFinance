@@ -162,8 +162,9 @@ export interface PeriodCheck {
 
 /** Gates for the period state machine: MAPPED needs confirmed mapping; RECONCILED needs balanced statements and tie-outs. */
 export function periodChecks(c: Company, a: Analysis, cfDiff: number | null, ties: Record<string, { ties: boolean; difference?: number } | null>): PeriodCheck[] {
-  const balanced = !a.issues.some((i) => i.code === "unbalanced");
   const tol = Math.max(0.01, c.tolerance ?? 0.01);
+  // The analyst's rounding tolerance applies to the trial balance too, for both periods.
+  const balanced = Math.abs(a.current.totalDebits - a.current.totalCredits) <= tol && (!a.prior || Math.abs(a.prior.totalDebits - a.prior.totalCredits) <= tol);
   const tied = (t: { ties: boolean; difference?: number } | null) => t === null || t.ties || (t.difference !== undefined && Math.abs(t.difference) <= tol);
   return [
     { key: "tbBalanced", ok: balanced, requiredFor: "MAPPED" },
