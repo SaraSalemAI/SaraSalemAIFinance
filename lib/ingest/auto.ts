@@ -66,6 +66,31 @@ export function autoAdvance(c: Company): Company {
   return status === next.period.status ? next : { ...next, period: { ...next.period, status } };
 }
 
+/**
+ * Importing a file replaces whatever already fills its slot (one trial balance per role and month,
+ * one ledger, one bank statement, one listing per subledger). When a batch has several files for
+ * the same slot, the largest is kept and the others are held for the analyst to choose, so no file
+ * is silently overwritten by the next one.
+ */
+export function onePerSlot<T>(items: T[], slotOf: (t: T) => { category: string; role?: string; month?: string | null; rows: number; label: string }) {
+  const slot = (t: T) => {
+    const s = slotOf(t);
+    return s.category === "TRIAL_BALANCE" ? `${s.category}|${s.role ?? "current"}|${s.role === "monthly" ? (s.month ?? "") : ""}` : s.category;
+  };
+  const groups = new Map<string, T[]>();
+  for (const t of items) groups.set(slot(t), [...(groups.get(slot(t)) ?? []), t]);
+  const keep = new Set<T>();
+  const held: Array<{ item: T; reason: string }> = [];
+  for (const list of groups.values()) {
+    const sorted = [...list].sort((p, q) => slotOf(q).rows - slotOf(p).rows);
+    keep.add(sorted[0]);
+    const s0 = slotOf(sorted[0]);
+    const what = s0.category === "TRIAL_BALANCE" ? `${s0.role ?? "current"}-period trial balance` : "file of this type";
+    for (const extra of sorted.slice(1)) held.push({ item: extra, reason: `another ${what} (${s0.label}) was used; importing both would replace one with the other, so choose which one to import` });
+  }
+  return { kept: items.filter((t) => keep.has(t)), held };
+}
+
 export interface PipelineResult {
   company: Company;
   run: ImportRun;
@@ -104,6 +129,11 @@ export function runPipeline(c: Company, items: Array<BatchItem & { unit: Unit }>
     statusAfter: next.period.status,
   };
   return { company: { ...next, importRuns: [...next.importRuns, run].slice(-20), validationRuns: [...next.validationRuns, vrun].slice(-30) }, run };
+}
+
+/** Which trial balance a company's rows came from, so a late AI answer is applied only to the file it was asked about. */
+export function tbIdentity(c: Company): string {
+  return [...new Set(c.rows.map((r) => r.sourceDocId ?? ""))].sort().join(",");
 }
 
 /** Applies the AI's account suggestions: confident ones are accepted, the rest wait for review. Never overrides a confirmed mapping. */

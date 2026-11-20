@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { errorMessage, readJson } from "@/lib/ai/payload";
+import { etaAuthorised } from "@/lib/eta/access";
 import { etaConfig, searchIssued } from "@/lib/eta/client";
 
 export const runtime = "nodejs";
@@ -7,7 +8,7 @@ export const maxDuration = 120;
 
 export async function GET() {
   const cfg = etaConfig();
-  return Response.json({ configured: !!cfg, env: cfg?.env ?? null });
+  return Response.json({ configured: !!cfg && !!process.env.ETA_ACCESS_KEY, env: cfg?.env ?? null });
 }
 
 const requestSchema = z.object({ from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) });
@@ -15,7 +16,8 @@ const requestSchema = z.object({ from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), 
 /** Pulls the company's issued, valid e-invoices for the period from the ETA portal (read-only). */
 export async function POST(req: Request) {
   const cfg = etaConfig();
-  if (!cfg) return Response.json({ error: "notConfigured", message: "ETA API credentials are not set. Add ETA_CLIENT_ID, ETA_CLIENT_SECRET and ETA_ENV (preprod or prod) to the server environment." }, { status: 503 });
+  if (!cfg || !process.env.ETA_ACCESS_KEY) return Response.json({ error: "notConfigured", message: "ETA API access is not set. Add ETA_CLIENT_ID, ETA_CLIENT_SECRET, ETA_ENV (preprod or prod) and ETA_ACCESS_KEY to the server environment." }, { status: 503 });
+  if (!etaAuthorised(req)) return Response.json({ error: "unauthorised", message: "Enter the ETA access key to pull invoices." }, { status: 401 });
   const read = await readJson(req);
   if (!read.ok) return read.response;
   const parsed = requestSchema.safeParse(read.body);

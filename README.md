@@ -28,7 +28,7 @@ The run is recorded (files, held files and why, mappings accepted, accounts stil
 - **Trial balance roles**: current period, prior period (comparatives merged by account code) or one month for trends.
 - **Scanned PDFs and photos** (full app with AI): read into a bank statement, AR, AP or TB table that you review like any other file.
 - **Email intake** (full app with Supabase): attachments mailed to `tb+<workspace key>@<your inbound domain>` are stored by the `/api/intake` webhook (Postmark or a generic JSON body; needs `INTAKE_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` and `supabase/migrations/0003_email_intake.sql`). **Check email inbox** on the upload tab imports them through the same pipeline. Not tested against a live mail provider or Supabase project.
-- **ETA portal** (full app with `ETA_CLIENT_ID` / `ETA_CLIENT_SECRET`): pulls the company's issued, valid e-invoices for the period, read-only. Signing and submitting still needs the company's e-seal and is not done here. Not yet tested against the live portal.
+- **ETA portal** (full app with `ETA_CLIENT_ID` / `ETA_CLIENT_SECRET` and an `ETA_ACCESS_KEY` users enter): pulls the company's issued, valid e-invoices for the period, read-only. Signing and submitting still needs the company's e-seal and is not done here. Not yet tested against the live portal.
 
 ### Close, group and team
 
@@ -103,6 +103,7 @@ npm run dev                  # http://localhost:3000
 | `AI_GATEWAY_API_KEY` | Vercel AI Gateway key. Not needed on Vercel, where OIDC (`VERCEL_OIDC_TOKEN`) is used automatically. |
 | `AI_GATEWAY_MODEL` | Optional model id, default `anthropic/claude-sonnet-5.5`. |
 | `ETA_CLIENT_ID`, `ETA_CLIENT_SECRET`, `ETA_ENV` | Optional ETA e-invoicing API credentials (`ETA_ENV` = `preprod` or `prod`) for pulling issued invoices. |
+| `ETA_ACCESS_KEY` | Required with the ETA credentials: the key users enter in the app before pulling invoices; the pull is refused without it. |
 | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Optional defaults for the Team & sync page. |
 
 Without a key everything except the AI panels works, and the panels say so.

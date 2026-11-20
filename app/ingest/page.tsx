@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AiPanel } from "@/components/AiPanel";
 import { BulkUpload } from "@/components/BulkUpload";
 import { Banner, Card, download, LockNotice, Page, Pill } from "@/components/ui";
@@ -110,6 +110,17 @@ function EtaPull() {
   const [status, setStatus] = useState<{ configured: boolean; env: string | null } | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const [key, setKey] = useState(() => {
+    try {
+      return sessionStorage.getItem("eta-access-key") ?? "";
+    } catch {
+      return "";
+    }
+  });
+  const periodRef = useRef(company ? `${company.id}:${company.period.start}:${company.period.end}` : "");
+  useEffect(() => {
+    periodRef.current = company ? `${company.id}:${company.period.start}:${company.period.end}` : "";
+  }, [company]);
   useEffect(() => {
     fetch("/api/eta").then((r) => r.json()).then(setStatus).catch(() => setStatus({ configured: false, env: null }));
   }, []);
@@ -117,17 +128,32 @@ function EtaPull() {
   const pull = async () => {
     setBusy(true);
     setMsg("");
+    const { start: from, end: to } = company.period;
+    const startedFor = `${company.id}:${from}:${to}`;
     try {
-      const res = await fetch("/api/eta", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from: company.period.start, to: company.period.end }) });
+      try {
+        sessionStorage.setItem("eta-access-key", key);
+      } catch {
+        /* storage unavailable: the key is still sent for this pull */
+      }
+      const res = await fetch("/api/eta", { method: "POST", headers: { "Content-Type": "application/json", "x-eta-access-key": key }, body: JSON.stringify({ from, to }) });
       const body = await res.json();
       if (!res.ok) throw new Error(body.message ?? `HTTP ${res.status}`);
       const id = uid("doc");
       const text = JSON.stringify(body.documents);
-      update({ action: "eta.pull", entity: "source_documents", recordId: id }, (c) => ({
-        ...c,
-        subledgers: { ...c.subledgers, eta: body.documents },
-        docs: [...c.docs.filter((d) => d.category !== "ETA_INVOICE"), { id, fileName: `ETA portal (${body.env}) ${c.period.start}..${c.period.end}`, sha256: sha256Bytes(new TextEncoder().encode(text)), category: "ETA_INVOICE", rowCount: body.documents.length, encoding: "api", uploadedAt: new Date().toISOString(), format: "eta-api" }],
-      }));
+      if (periodRef.current !== startedFor) {
+        setMsg(L("The company or period changed during the pull; nothing was saved. Pull again.", "تغيرت الشركة أو الفترة أثناء السحب ولم يُحفظ شيء. اسحب مرة أخرى."));
+        return;
+      }
+      // `update` is bound to the company the pull started for; the period check repeats inside the write.
+      update({ action: "eta.pull", entity: "source_documents", recordId: id }, (c) => {
+        if (c.period.start !== from || c.period.end !== to) return c;
+        return {
+          ...c,
+          subledgers: { ...c.subledgers, eta: body.documents },
+          docs: [...c.docs.filter((d) => d.category !== "ETA_INVOICE"), { id, fileName: `ETA portal (${body.env}) ${from}..${to}`, sha256: sha256Bytes(new TextEncoder().encode(text)), category: "ETA_INVOICE", rowCount: body.documents.length, encoding: "api", uploadedAt: new Date().toISOString(), format: "eta-api" }],
+        };
+      });
       setMsg(L(`${body.documents.length} documents pulled.`, `تم سحب ${body.documents.length} مستند.`));
     } catch (e) {
       setMsg((e as Error).message);
@@ -139,10 +165,11 @@ function EtaPull() {
     <Card title={L("ETA e-invoicing portal", "منظومة الفاتورة الإلكترونية")}>
       {status.configured ? (
         <p className="small">
-          <button onClick={pull} disabled={busy || locked}>{busy ? "…" : L("Pull issued invoices for the period", "سحب الفواتير الصادرة للفترة")}</button> <span className="muted">({status.env})</span> {msg}
+          <input type="password" placeholder={L("ETA access key", "مفتاح الوصول")} value={key} onChange={(e) => setKey(e.target.value)} style={{ width: 160 }} />{" "}
+          <button onClick={pull} disabled={busy || locked || !key}>{busy ? "…" : L("Pull issued invoices for the period", "سحب الفواتير الصادرة للفترة")}</button> <span className="muted">({status.env})</span> {msg}
         </p>
       ) : (
-        <p className="small muted">{L("Not connected. To pull invoices directly, the server needs ETA_CLIENT_ID, ETA_CLIENT_SECRET and ETA_ENV (your ERP system's ETA API credentials). Exported ETA JSON/XML files work without it.", "غير متصل. لسحب الفواتير مباشرة يحتاج الخادم إلى ETA_CLIENT_ID وETA_CLIENT_SECRET وETA_ENV. ملفات التصدير تعمل بدونها.")}</p>
+        <p className="small muted">{L("Not connected. To pull invoices directly, the server needs ETA_CLIENT_ID, ETA_CLIENT_SECRET and ETA_ENV (your ERP system's ETA API credentials) plus an ETA_ACCESS_KEY that users enter here. Exported ETA JSON/XML files work without it.", "غير متصل. لسحب الفواتير مباشرة يحتاج الخادم إلى ETA_CLIENT_ID وETA_CLIENT_SECRET وETA_ENV ومفتاح ETA_ACCESS_KEY. ملفات التصدير تعمل بدونها.")}</p>
       )}
       <p className="muted small">{L("Read-only: it reads documents already submitted. Signing and submitting invoices needs your e-seal (USB token / HSM) and is not done here. VAT is total minus net amount from the portal's search results.", "قراءة فقط: يقرأ المستندات المقدمة. التوقيع والتقديم يحتاج الختم الإلكتروني ولا يتم هنا. الضريبة = الإجمالي ناقص الصافي من نتائج البحث.")}</p>
     </Card>

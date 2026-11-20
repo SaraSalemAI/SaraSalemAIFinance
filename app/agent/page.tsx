@@ -15,7 +15,7 @@ import { makeT } from "@/lib/i18n";
 import { listInbox, markImported } from "@/lib/sync/supabase";
 import { uid } from "@/lib/workspace/defaults";
 import { useFormat, useL, useWorkspace } from "@/lib/workspace/store";
-import type { Company } from "@/lib/workspace/types";
+import type { Company, ImportRun } from "@/lib/workspace/types";
 
 interface ToolTrace {
   id: string;
@@ -69,6 +69,10 @@ export default function AgentPage() {
   const abort = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const companyId = company?.id;
+  // The company a streamed reply belongs to; replies for a company no longer selected are dropped.
+  const activeCompany = useRef(companyId);
+  // Inbox files handed to the upload but not yet confirmed imported: marked only once the import succeeds.
+  const pendingInbox = useRef<Array<{ id: string; name: string }>>([]);
 
   useEffect(() => {
     aiStatus().then(setStatus);
@@ -76,6 +80,9 @@ export default function AgentPage() {
   }, []);
 
   useEffect(() => {
+    activeCompany.current = companyId;
+    // A reply still streaming belongs to the previous company: stop it.
+    abort.current?.abort();
     if (!companyId) return;
     let saved: Msg[] = [];
     try {
@@ -135,7 +142,11 @@ export default function AgentPage() {
     setBusy(true);
     const ctrl = new AbortController();
     abort.current = ctrl;
-    const patch = (fn: (m: Msg) => Msg) => setMsgs((prev) => [...prev.slice(0, -1), fn(prev[prev.length - 1])]);
+    const forCompany = company.id;
+    const patch = (fn: (m: Msg) => Msg) => {
+      if (activeCompany.current !== forCompany || ctrl.signal.aborted) return;
+      setMsgs((prev) => (prev.length && prev[prev.length - 1].role === "assistant" ? [...prev.slice(0, -1), fn(prev[prev.length - 1])] : prev));
+    };
     if (status?.configured === false) {
       // No model available: answer from the built-in queries instead.
       try {
@@ -144,7 +155,7 @@ export default function AgentPage() {
       } catch (err) {
         patch((m) => ({ ...m, error: (err as Error).message }));
       } finally {
-        setBusy(false);
+        if (activeCompany.current === forCompany) setBusy(false);
       }
       return;
     }
@@ -192,7 +203,7 @@ export default function AgentPage() {
     } catch (err) {
       if ((err as Error).name !== "AbortError") patch((m) => ({ ...m, error: (err as Error).message }));
     } finally {
-      setBusy(false);
+      if (abort.current === ctrl || activeCompany.current !== forCompany) setBusy(false);
     }
   };
 
@@ -238,7 +249,8 @@ export default function AgentPage() {
         for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
         return new File([bytes], it.file_name, { type: it.content_type ?? "application/octet-stream" });
       });
-      await markImported(sync, items.map((it) => it.id));
+      // Marked imported only after the upload imports them (see onPipeline); held or unreadable files stay in the inbox.
+      pendingInbox.current = items.map((it) => ({ id: it.id, name: it.file_name }));
       setAttached(files);
       setInbox({ busy: false, note: L(`${files.length} file(s) from email: ${[...new Set(items.map((i) => i.sender).filter(Boolean))].join(", ")}`, `${files.length} ملف من البريد: ${[...new Set(items.map((i) => i.sender).filter(Boolean))].join("، ")}`) });
     } catch (e) {
@@ -250,7 +262,13 @@ export default function AgentPage() {
     "Review the files I just uploaded: what was imported, what was held back, which validation rules fail and what should I fix first?",
     "راجع الملفات التي رفعتها: ما الذي تم استيراده، وما الذي تم تعليقه، وأي قواعد تحقق فشلت، وبماذا أبدأ؟",
   );
-  const onPipeline = () => {
+  const onPipeline = (run: ImportRun) => {
+    const imported = new Set(run.files.map((x) => x.name.split(" › ")[0]));
+    const done = pendingInbox.current.filter((p) => imported.has(p.name));
+    if (done.length && ws.sync?.accessToken) {
+      pendingInbox.current = pendingInbox.current.filter((p) => !done.includes(p));
+      markImported(ws.sync, done.map((p) => p.id)).catch((e) => setInbox((s) => ({ ...s, note: (e as Error).message })));
+    }
     if (!askAfterImport) return;
     setAskAfterImport(false);
     setTab("chat");

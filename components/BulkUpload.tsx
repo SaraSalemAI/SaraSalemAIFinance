@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { IS_STATIC } from "@/lib/env";
 import { makeT } from "@/lib/i18n";
 import { DOC_LABELS, TIE_LABELS } from "@/lib/labels";
-import { applyAiMappings, autoEligible, remembered, runPipeline } from "@/lib/ingest/auto";
+import { applyAiMappings, autoEligible, onePerSlot, remembered, runPipeline, tbIdentity } from "@/lib/ingest/auto";
 import { ALL_CATEGORIES, batchChecks, UNLOCKS, type BatchItem } from "@/lib/ingest/checks";
 import { allFields, requiredFields, type CsvCategory } from "@/lib/ingest/erp";
 import { applyStaged, expandFiles, stageUnit, type Staged, type TbRole, type Unit } from "@/lib/ingest/stage";
@@ -77,6 +77,8 @@ export function BulkUpload(props: Props) {
   const [first, setFirst] = useState<File[] | null>(null);
   const [drag, setDrag] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+  // Kept here, not in the inner component, so a remount for another company does not re-read the same incoming files.
+  const handledRef = useRef<File[] | null>(null);
   if (!company) {
     const start = (files: FileList | null) => {
       if (!files?.length) return;
@@ -110,7 +112,10 @@ export function BulkUpload(props: Props) {
   }
   return (
     <BulkUploadInner
+      // Staged files belong to one company: switching companies starts a fresh upload session.
+      key={company.id}
       {...props}
+      handledRef={handledRef}
       incoming={first ?? props.incoming}
       onIncomingDone={() => {
         if (first) setFirst(null);
@@ -120,7 +125,7 @@ export function BulkUpload(props: Props) {
   );
 }
 
-function BulkUploadInner({ compact = false, incoming = null, onIncomingDone, onPipeline }: Props) {
+function BulkUploadInner({ compact = false, incoming = null, onIncomingDone, onPipeline, handledRef }: Props & { handledRef: { current: File[] | null } }) {
   const { ws, company: current, update, locked } = useWorkspace();
   const company = current!;
   const L = useL();
@@ -138,7 +143,11 @@ function BulkUploadInner({ compact = false, incoming = null, onIncomingDone, onP
   const [aiNote, setAiNote] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const input = useRef<HTMLInputElement>(null);
-  const handled = useRef<File[] | null>(null);
+  // The company as it is now, for async steps that must not act on a trial balance that has since been replaced.
+  const latest = useRef(company);
+  useEffect(() => {
+    latest.current = company;
+  }, [company]);
 
   const included = useMemo(() => rows.filter((r) => r.include && r.staged && r.category), [rows]);
   const items: BatchItem[] = useMemo(() => included.map((r) => ({ id: r.unit.id, staged: r.staged!, role: r.role, month: r.month })), [included]);
@@ -154,7 +163,7 @@ function BulkUploadInner({ compact = false, incoming = null, onIncomingDone, onP
       patch(row.unit.id, { category: null, staged: null, include: false });
       return null;
     }
-    patch(row.unit.id, { category, busy: true, error: "", progress: category === "GENERAL_LEDGER" ? 0 : null });
+    patch(row.unit.id, { category, staged: null, include: false, busy: true, error: "", progress: category === "GENERAL_LEDGER" ? 0 : null });
     try {
       const staged = await stageUnit(row.unit, category, { columnMap: columnMap ?? company.columnMaps[category], onProgress: (p) => patch(row.unit.id, { progress: p }) });
       patch(row.unit.id, { staged, include: !staged.issues.some((i) => i.level === "error"), busy: false, progress: null });
@@ -175,14 +184,10 @@ function BulkUploadInner({ compact = false, incoming = null, onIncomingDone, onP
       if (e.ok && staged) eligible.push({ row, staged });
       else held.push({ name: name(row.unit), reason: e.reason });
     }
-    // Only one current and one prior trial balance can be used: keep the largest, hold the others.
-    for (const role of ["current", "prior"] as const) {
-      const tbs = eligible.filter((x) => x.staged.category === "TRIAL_BALANCE" && x.row.role === role).sort((p, q) => q.staged.rowCount - p.staged.rowCount);
-      for (const extra of tbs.slice(1)) {
-        eligible.splice(eligible.indexOf(extra), 1);
-        held.push({ name: name(extra.row.unit), reason: `another ${role}-period trial balance (${name(tbs[0].row.unit)}) was used; choose which one to import` });
-      }
-    }
+    // Each slot (a trial balance per role and month, the ledger, each statement or listing) takes one file: keep the largest, hold the others.
+    const slots = onePerSlot(eligible, (x) => ({ category: x.staged.category, role: x.row.role, month: x.row.month?.label, rows: x.staged.rowCount, label: name(x.row.unit) }));
+    eligible.splice(0, eligible.length, ...slots.kept);
+    for (const h of slots.held) held.push({ name: name(h.item.row.unit), reason: h.reason });
     // Held files stay listed for the analyst but are not ticked, so the preview below shows only what was chosen.
     const heldIds = new Set(results.filter((r) => !eligible.some((x) => x.row.unit.id === r.row.unit.id)).map((r) => r.row.unit.id));
     if (heldIds.size) setRows((rs) => rs.map((r) => (heldIds.has(r.unit.id) ? { ...r, include: false } : r)));
@@ -211,8 +216,10 @@ function BulkUploadInner({ compact = false, incoming = null, onIncomingDone, onP
           const data = await res.json();
           if (!res.ok) throw new Error(data.message ?? `HTTP ${res.status}`);
           const threshold = a.autoMapThreshold;
+          const tb = tbIdentity(local.company);
+          if (tbIdentity(latest.current) !== tb) throw new Error(L("The trial balance was replaced while the AI was mapping; its suggestions were not applied.", "تم استبدال ميزان المراجعة أثناء الربط بالذكاء الاصطناعي ولم تُطبق اقتراحاته."));
           const after = applyAiMappings(local.company, data.mappings, threshold, runId);
-          update({ action: "mapping.aiAuto", entity: "trial_balance_records", recordId: runId, reason: `AI mapping: ${after.accepted} accepted at ≥${threshold}%, ${after.suggested} left for review` }, (c) => applyAiMappings(c, data.mappings, threshold, runId).company);
+          update({ action: "mapping.aiAuto", entity: "trial_balance_records", recordId: runId, reason: `AI mapping: ${after.accepted} accepted at ≥${threshold}%, ${after.suggested} left for review` }, (c) => (tbIdentity(c) === tb ? applyAiMappings(c, data.mappings, threshold, runId).company : c));
           run = after.company.importRuns.find((r) => r.id === runId) ?? run;
         }
       } catch (e) {
@@ -257,8 +264,8 @@ function BulkUploadInner({ compact = false, incoming = null, onIncomingDone, onP
   };
 
   useEffect(() => {
-    if (!incoming?.length || incoming === handled.current) return;
-    handled.current = incoming;
+    if (!incoming?.length || incoming === handledRef.current) return;
+    handledRef.current = incoming;
     void Promise.resolve().then(async () => {
       await addFiles(incoming);
       onIncomingDone?.();
